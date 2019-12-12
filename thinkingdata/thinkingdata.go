@@ -12,7 +12,7 @@ const (
 	USER_ADD      = "user_add"
 	USER_DEL      = "user_del"
 
-	SDK_VERSION = "1.0.0"
+	SDK_VERSION = "1.0.1"
 	LIB_NAME    = "Golang"
 )
 
