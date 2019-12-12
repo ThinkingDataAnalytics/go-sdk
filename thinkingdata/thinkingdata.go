@@ -18,12 +18,12 @@ const (
 
 // 数据信息
 type Data struct {
-	AccountId  string                 `json:"#account_id"`
-	DistinctId string                 `json:"#distinct_id"`
+	AccountId  string                 `json:"#account_id,omitempty"`
+	DistinctId string                 `json:"#distinct_id,omitempty"`
 	Type       string                 `json:"#type"`
 	Time       string                 `json:"#time"`
-	EventName  string                 `json:"#event_name"`
-	Ip         string                 `json:"#ip"`
+	EventName  string                 `json:"#event_name,omitempty"`
+	Ip         string                 `json:"#ip,omitempty"`
 	Properties map[string]interface{} `json:"properties"`
 }
 
