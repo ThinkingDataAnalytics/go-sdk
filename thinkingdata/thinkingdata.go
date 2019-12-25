@@ -8,11 +8,12 @@ import (
 const (
 	TRACK         = "track"
 	USER_SET      = "user_set"
+	USER_UNSET    = "user_unset"
 	USER_SET_ONCE = "user_setOnce"
 	USER_ADD      = "user_add"
 	USER_DEL      = "user_del"
 
-	SDK_VERSION = "1.0.1"
+	SDK_VERSION = "1.0.2"
 	LIB_NAME    = "Golang"
 )
 
@@ -90,6 +91,20 @@ func (ta *TDAnalytics) UserSet(accountId string, distinctId string, properties m
 	p := make(map[string]interface{})
 	mergeProperties(p, properties)
 	return ta.add(accountId, distinctId, USER_SET, "", p)
+}
+
+//删除用户属性
+func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string) error {
+	if len(s) == 0 {
+		return errors.New("Invalid params for UserUnset: properties is nil")
+	}
+	prop := make(map[string]interface{})
+	for _, v := range s {
+		prop[v] = 0
+	}
+	p := make(map[string]interface{})
+	mergeProperties(p, prop)
+	return ta.add(accountId, distinctId, USER_UNSET, "", p)
 }
 
 // 设置用户属性. 不会覆盖同名属性.
