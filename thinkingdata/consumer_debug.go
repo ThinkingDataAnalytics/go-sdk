@@ -13,18 +13,22 @@ import (
 type DebugConsumer struct {
 	serverUrl string // 接收端地址
 	appId     string // 项目 APP ID
+	writeData bool   // 是否写入TA库
 }
 
 // 创建 DebugConsumer. DebugConsumer 实现逐条上报数据，并返回数据校验的详细错误信息.
 func NewDebugConsumer(serverUrl string, appId string) (Consumer, error) {
+	return NewDebugConsumerWithWriter(serverUrl, appId, true)
+}
+func NewDebugConsumerWithWriter(serverUrl string, appId string, writeData bool) (Consumer, error) {
 	u, err := url.Parse(serverUrl)
 	if err != nil {
 		return nil, err
 	}
 
-	u.Path = "/sync_data"
+	u.Path = "/data_debug"
 
-	c := &DebugConsumer{serverUrl: u.String(), appId: appId}
+	c := &DebugConsumer{serverUrl: u.String(), appId: appId, writeData: writeData}
 	return c, nil
 }
 
@@ -46,7 +50,11 @@ func (c *DebugConsumer) Close() error {
 }
 
 func (c *DebugConsumer) send(data string) error {
-	resp, err := http.PostForm(c.serverUrl, url.Values{"data": {data}, "appid": {c.appId}, "debug": {"1"}})
+	var dryRun = "0"
+	if !c.writeData {
+		dryRun = "1"
+	}
+	resp, err := http.PostForm(c.serverUrl, url.Values{"data": {data}, "appid": {c.appId}, "source": {"server"}, "dryRun": {dryRun}})
 	if err != nil {
 		return err
 	}
@@ -55,18 +63,13 @@ func (c *DebugConsumer) send(data string) error {
 
 	if resp.StatusCode == http.StatusOK {
 		body, _ := ioutil.ReadAll(resp.Body)
-		var result struct {
-			Code int
-			Msg  string
-		}
-
+		result := map[string]interface{}{}
 		err = json.Unmarshal(body, &result)
 		if err != nil {
 			return err
 		}
-
-		if result.Code != 0 {
-			return errors.New(fmt.Sprintf("send to receiver failed with return code: %d, due to %s", result.Code, result.Msg))
+		if uint64(result["errorLevel"].(float64)) != 0 {
+			return errors.New(fmt.Sprintf("send to receiver failed with return content:  %s", string(body)))
 		}
 
 	} else {

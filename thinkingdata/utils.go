@@ -37,6 +37,18 @@ func extractTime(p map[string]interface{}) string {
 	return time.Now().Format(DATE_FORMAT)
 }
 
+func extractUUID(p map[string]interface{}) string {
+	if t, ok := p["#uuid"]; ok {
+		delete(p, "#uuid")
+		v, ok := t.(string)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "Invalid data type for #uuid")
+		}
+		return v
+	}
+	return ""
+}
+
 func extractIp(p map[string]interface{}) string {
 	if t, ok := p["#ip"]; ok {
 		delete(p, "#ip")
@@ -89,11 +101,12 @@ func formatProperties(d *Data) error {
 				if len(v.(string)) > VALUE_MAX {
 					return errors.New("the max length of property value is 2048")
 				}
+			case []string:
 			case time.Time: //only support time.Time
 				d.Properties[k] = v.(time.Time).Format(DATE_FORMAT)
 			default:
 				if isNotNumber(v) {
-					return errors.New("Invalid property value type. Supported types: numbers, string, time.Time, bool")
+					return errors.New("Invalid property value type. Supported types: numbers, string, time.Time, bool, []string")
 				}
 			}
 		}

@@ -11,9 +11,10 @@ const (
 	USER_UNSET    = "user_unset"
 	USER_SET_ONCE = "user_setOnce"
 	USER_ADD      = "user_add"
+	USER_APPEND   = "user_append"
 	USER_DEL      = "user_del"
 
-	SDK_VERSION = "1.0.2"
+	SDK_VERSION = "1.1.0"
 	LIB_NAME    = "Golang"
 )
 
@@ -25,6 +26,7 @@ type Data struct {
 	Time       string                 `json:"#time"`
 	EventName  string                 `json:"#event_name,omitempty"`
 	Ip         string                 `json:"#ip,omitempty"`
+	UUID       string                 `json:"#uuid,omitempty"`
 	Properties map[string]interface{} `json:"properties"`
 }
 
@@ -73,6 +75,9 @@ func (ta *TDAnalytics) ClearSuperProperties() {
 
 // 追踪一个事件
 func (ta *TDAnalytics) Track(accountId string, distinctId string, eventName string, properties map[string]interface{}) error {
+	if len(eventName) == 0 {
+		return errors.New("The event name must be provided.")
+	}
 	p := ta.GetSuperProperties()
 	p["#lib"] = LIB_NAME
 	p["#lib_version"] = SDK_VERSION
@@ -129,6 +134,17 @@ func (ta *TDAnalytics) UserAdd(accountId string, distinctId string, properties m
 	return ta.add(accountId, distinctId, USER_ADD, "", p)
 }
 
+// 对数组类型的属性做追加加操作
+func (ta *TDAnalytics) UserAppend(accountId string, distinctId string, properties map[string]interface{}) error {
+	if properties == nil {
+		return errors.New("Invalid params for UserAppend: properties is nil")
+	}
+
+	p := make(map[string]interface{})
+	mergeProperties(p, properties)
+	return ta.add(accountId, distinctId, USER_APPEND, "", p)
+}
+
 // 删除用户数据, 之后无法查看用户属性, 但是之前已经入库的事件数据不会被删除. 此操作不可逆
 func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
 	return ta.add(accountId, distinctId, USER_DEL, "", nil)
@@ -155,6 +171,8 @@ func (ta *TDAnalytics) add(accountId string, distinctId string, dataType string,
 	// 获取 properties 中 #time 值, 如不存在则返回当前时间
 	eventTime := extractTime(properties)
 
+	//如果上传#uuid， 只支持UUID标准格式xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx的string类型
+	uuid := extractUUID(properties)
 	data := Data{
 		AccountId:  accountId,
 		DistinctId: distinctId,
@@ -162,6 +180,7 @@ func (ta *TDAnalytics) add(accountId string, distinctId string, dataType string,
 		Time:       eventTime,
 		EventName:  eventName,
 		Ip:         ip,
+		UUID:       uuid,
 		Properties: properties,
 	}
 

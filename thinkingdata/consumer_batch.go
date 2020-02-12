@@ -4,7 +4,6 @@ package thinkingdata
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ type BatchConsumer struct {
 	serverUrl string         // 接收端地址
 	appId     string         // 项目 APP ID
 	Timeout   time.Duration  // 网络请求超时时间, 单位毫秒
+	compress  bool           //是否数据压缩
 	ch        chan batchData // 数据传输信道
 	wg        sync.WaitGroup
 }
@@ -31,10 +31,11 @@ type batchData struct {
 }
 
 const (
-	DEFAULT_TIME_OUT   = 30000 // 默认超时时长 30 秒
-	DEFAULT_BATCH_SIZE = 20    // 默认批量发送条数
-	MAX_BATCH_SIZE     = 200   // 最大批量发送条数
-	BATCH_CHANNEL_SIZE = 1000  // 数据缓冲区大小, 超过此值时会阻塞
+	DEFAULT_TIME_OUT   = 30000  // 默认超时时长 30 秒
+	DEFAULT_BATCH_SIZE = 20     // 默认批量发送条数
+	MAX_BATCH_SIZE     = 200    // 最大批量发送条数
+	BATCH_CHANNEL_SIZE = 1000   // 数据缓冲区大小, 超过此值时会阻塞
+	DEFAULT_COMPRESS   = true   //默认压缩gzip
 
 	TYPE_DATA  batchDataType = 0 // 数据类型
 	TYPE_FLUSH batchDataType = 1 // 立即发送数据
@@ -42,7 +43,7 @@ const (
 
 // 创建 BatchConsumer
 func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
-	return initBatchConsumer(serverUrl, appId, DEFAULT_BATCH_SIZE, DEFAULT_TIME_OUT)
+	return initBatchConsumer(serverUrl, appId, DEFAULT_BATCH_SIZE, DEFAULT_TIME_OUT, DEFAULT_COMPRESS)
 }
 
 // 创建指定批量发送条数的 BatchConsumer
@@ -50,15 +51,23 @@ func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
 // appId 项目的 APP ID
 // batchSize 批量发送条数
 func NewBatchConsumerWithBatchSize(serverUrl string, appId string, batchSize int) (Consumer, error) {
-	return initBatchConsumer(serverUrl, appId, batchSize, DEFAULT_TIME_OUT)
+	return initBatchConsumer(serverUrl, appId, batchSize, DEFAULT_TIME_OUT, DEFAULT_COMPRESS)
 }
 
-func initBatchConsumer(serverUrl string, appId string, batchSize int, timeout int) (Consumer, error) {
+// 创建指定压缩形式的 BatchConsumer
+// serverUrl 接收端地址
+// appId 项目的 APP ID
+// compress 是否压缩数据
+func NewBatchConsumerWithCompress(serverUrl string, appId string, compress bool) (Consumer, error) {
+	return initBatchConsumer(serverUrl, appId, DEFAULT_BATCH_SIZE, DEFAULT_TIME_OUT, compress)
+}
+
+func initBatchConsumer(serverUrl string, appId string, batchSize int, timeout int, compress bool) (Consumer, error) {
 	u, err := url.Parse(serverUrl)
 	if err != nil {
 		return nil, err
 	}
-	u.Path = "/logagent"
+	u.Path = "/sync_server"
 
 	if batchSize > MAX_BATCH_SIZE {
 		batchSize = MAX_BATCH_SIZE
@@ -67,6 +76,7 @@ func initBatchConsumer(serverUrl string, appId string, batchSize int, timeout in
 		serverUrl: u.String(),
 		appId:     appId,
 		Timeout:   time.Duration(timeout) * time.Millisecond,
+		compress:  compress,
 		ch:        make(chan batchData, CHANNEL_SIZE),
 	}
 
@@ -138,7 +148,15 @@ func (c *BatchConsumer) Close() error {
 }
 
 func (c *BatchConsumer) send(data string) error {
-	encodedData, err := encodeData(data)
+	var encodedData string
+	var err error
+	var compressType = "gzip"
+	if c.compress {
+		encodedData, err = encodeData(data)
+	} else {
+		encodedData = data
+		compressType = "none"
+	}
 	if err != nil {
 		return err
 	}
@@ -148,8 +166,8 @@ func (c *BatchConsumer) send(data string) error {
 	req, _ := http.NewRequest("POST", c.serverUrl, postData)
 	req.Header["appid"] = []string{c.appId}
 	req.Header.Set("user-agent", "ta-go-sdk")
-	req.Header.Set("version", "1.0.0")
-
+	req.Header.Set("version", "1.1.0")
+	req.Header.Set("compress", compressType)
 	client := &http.Client{Timeout: c.Timeout}
 	resp, err = client.Do(req)
 
@@ -179,7 +197,7 @@ func (c *BatchConsumer) send(data string) error {
 	return nil
 }
 
-// Gzip 压缩 + Base64 编码
+// Gzip 压缩
 func encodeData(data string) (string, error) {
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
@@ -191,5 +209,5 @@ func encodeData(data string) (string, error) {
 	}
 	gw.Close()
 
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return string(buf.Bytes()), nil
 }
