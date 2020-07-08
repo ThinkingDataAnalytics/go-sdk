@@ -11,7 +11,6 @@ import (
 const (
 	DATE_FORMAT = "2006-01-02 15:04:05.000"
 	KEY_PATTERN = "^[a-zA-Z#][A-Za-z0-9_]{0,49}$"
-	VALUE_MAX   = 2048
 )
 
 var keyPattern, _ = regexp.Compile(KEY_PATTERN)
@@ -25,13 +24,14 @@ func mergeProperties(target, source map[string]interface{}) {
 func extractTime(p map[string]interface{}) string {
 	if t, ok := p["#time"]; ok {
 		delete(p, "#time")
-
-		v, ok := t.(time.Time)
-		if !ok {
-			fmt.Fprintln(os.Stderr, "Invalid data type for #time")
-			return time.Now().Format(DATE_FORMAT)
-		}
-		return v.Format(DATE_FORMAT)
+        switch v:= t.(type){
+         case string:
+            return v
+         case time.Time:
+        	return v.Format(DATE_FORMAT)
+         default:
+            return time.Now().Format(DATE_FORMAT)
+        }
 	}
 
 	return time.Now().Format(DATE_FORMAT)
@@ -98,9 +98,6 @@ func formatProperties(d *Data) error {
 			switch v.(type) {
 			case bool:
 			case string:
-				if len(v.(string)) > VALUE_MAX {
-					return errors.New("the max length of property value is 2048")
-				}
 			case []string:
 			case time.Time: //only support time.Time
 				d.Properties[k] = v.(time.Time).Format(DATE_FORMAT)

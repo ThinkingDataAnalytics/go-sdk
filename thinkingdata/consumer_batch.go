@@ -166,7 +166,7 @@ func (c *BatchConsumer) send(data string) error {
 	req, _ := http.NewRequest("POST", c.serverUrl, postData)
 	req.Header["appid"] = []string{c.appId}
 	req.Header.Set("user-agent", "ta-go-sdk")
-	req.Header.Set("version", "1.1.0")
+	req.Header.Set("version", "1.1.1")
 	req.Header.Set("compress", compressType)
 	client := &http.Client{Timeout: c.Timeout}
 	resp, err = client.Do(req)
