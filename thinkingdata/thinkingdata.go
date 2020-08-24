@@ -6,28 +6,32 @@ import (
 )
 
 const (
-	TRACK         = "track"
-	USER_SET      = "user_set"
-	USER_UNSET    = "user_unset"
-	USER_SET_ONCE = "user_setOnce"
-	USER_ADD      = "user_add"
-	USER_APPEND   = "user_append"
-	USER_DEL      = "user_del"
+	TRACK           = "track"
+	TRACK_UPDATE    = "track_update"
+	TRACK_OVERWRITE = "track_overwrite"
+	USER_SET        = "user_set"
+	USER_UNSET      = "user_unset"
+	USER_SET_ONCE   = "user_setOnce"
+	USER_ADD        = "user_add"
+	USER_APPEND     = "user_append"
+	USER_DEL        = "user_del"
 
-	SDK_VERSION = "1.1.1"
+	SDK_VERSION = "1.2.0"
 	LIB_NAME    = "Golang"
 )
 
 // 数据信息
 type Data struct {
-	AccountId  string                 `json:"#account_id,omitempty"`
-	DistinctId string                 `json:"#distinct_id,omitempty"`
-	Type       string                 `json:"#type"`
-	Time       string                 `json:"#time"`
-	EventName  string                 `json:"#event_name,omitempty"`
-	Ip         string                 `json:"#ip,omitempty"`
-	UUID       string                 `json:"#uuid,omitempty"`
-	Properties map[string]interface{} `json:"properties"`
+	AccountId    string                 `json:"#account_id,omitempty"`
+	DistinctId   string                 `json:"#distinct_id,omitempty"`
+	Type         string                 `json:"#type"`
+	Time         string                 `json:"#time"`
+	EventName    string                 `json:"#event_name,omitempty"`
+	EventId      string                 `json:"#event_id,omitempty"`
+	FirstCheckId string                 `json:"#first_check_id,omitempty"`
+	Ip           string                 `json:"#ip,omitempty"`
+	UUID         string                 `json:"#uuid,omitempty"`
+	Properties   map[string]interface{} `json:"properties"`
 }
 
 // Consumer 为数据实现 IO 操作（写入磁盘或者发送到接收端）
@@ -74,80 +78,80 @@ func (ta *TDAnalytics) ClearSuperProperties() {
 }
 
 // 追踪一个事件
-func (ta *TDAnalytics) Track(accountId string, distinctId string, eventName string, properties map[string]interface{}) error {
+func (ta *TDAnalytics) Track(accountId, distinctId, eventName string, properties map[string]interface{}) error {
+	return ta.track(accountId, distinctId, TRACK, eventName, "", properties)
+}
+
+func (ta *TDAnalytics) TrackUpdate(accountId, distinctId, eventName, eventId string, properties map[string]interface{}) error {
+	return ta.track(accountId, distinctId, TRACK_UPDATE, eventName, eventId, properties)
+}
+
+func (ta *TDAnalytics) TrackOverwrite(accountId, distinctId, eventName, eventId string, properties map[string]interface{}) error {
+	return ta.track(accountId, distinctId, TRACK_OVERWRITE, eventName, eventId, properties)
+}
+
+func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
 	if len(eventName) == 0 {
-		return errors.New("The event name must be provided.")
+		return errors.New("the event name must be provided")
 	}
+
+	if len(eventId) == 0 && dataType != TRACK {
+		return errors.New("the event id must be provided")
+	}
+
 	p := ta.GetSuperProperties()
 	p["#lib"] = LIB_NAME
 	p["#lib_version"] = SDK_VERSION
 
 	mergeProperties(p, properties)
 
-	return ta.add(accountId, distinctId, TRACK, eventName, p)
+	return ta.add(accountId, distinctId, dataType, eventName, eventId, p)
 }
 
 // 设置用户属性. 如果同名属性已存在，则用传入的属性覆盖同名属性.
 func (ta *TDAnalytics) UserSet(accountId string, distinctId string, properties map[string]interface{}) error {
-	if properties == nil {
-		return errors.New("Invalid params for UserSet: properties is nil")
-	}
-
-	p := make(map[string]interface{})
-	mergeProperties(p, properties)
-	return ta.add(accountId, distinctId, USER_SET, "", p)
+	return ta.user(accountId, distinctId, USER_SET, properties)
 }
 
 //删除用户属性
 func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string) error {
 	if len(s) == 0 {
-		return errors.New("Invalid params for UserUnset: properties is nil")
+		return errors.New("invalid params for UserUnset: properties is nil")
 	}
 	prop := make(map[string]interface{})
 	for _, v := range s {
 		prop[v] = 0
 	}
-	p := make(map[string]interface{})
-	mergeProperties(p, prop)
-	return ta.add(accountId, distinctId, USER_UNSET, "", p)
+	return ta.user(accountId, distinctId, USER_UNSET, prop)
 }
 
 // 设置用户属性. 不会覆盖同名属性.
 func (ta *TDAnalytics) UserSetOnce(accountId string, distinctId string, properties map[string]interface{}) error {
-	if properties == nil {
-		return errors.New("Invalid params for UserSetOnce: properties is nil")
-	}
-
-	p := make(map[string]interface{})
-	mergeProperties(p, properties)
-	return ta.add(accountId, distinctId, USER_SET_ONCE, "", p)
+	return ta.user(accountId, distinctId, USER_SET_ONCE, properties)
 }
 
 // 对数值类型的属性做累加操作
 func (ta *TDAnalytics) UserAdd(accountId string, distinctId string, properties map[string]interface{}) error {
-	if properties == nil {
-		return errors.New("Invalid params for UserAdd: properties is nil")
-	}
-
-	p := make(map[string]interface{})
-	mergeProperties(p, properties)
-	return ta.add(accountId, distinctId, USER_ADD, "", p)
+	return ta.user(accountId, distinctId, USER_ADD, properties)
 }
 
 // 对数组类型的属性做追加加操作
 func (ta *TDAnalytics) UserAppend(accountId string, distinctId string, properties map[string]interface{}) error {
-	if properties == nil {
-		return errors.New("Invalid params for UserAppend: properties is nil")
-	}
-
-	p := make(map[string]interface{})
-	mergeProperties(p, properties)
-	return ta.add(accountId, distinctId, USER_APPEND, "", p)
+	return ta.user(accountId, distinctId, USER_APPEND, properties)
 }
 
 // 删除用户数据, 之后无法查看用户属性, 但是之前已经入库的事件数据不会被删除. 此操作不可逆
 func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
-	return ta.add(accountId, distinctId, USER_DEL, "", nil)
+	return ta.user(accountId, distinctId, USER_DEL, nil)
+}
+
+func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties map[string]interface{}) error {
+	if properties == nil && dataType != USER_DEL {
+		return errors.New("invalid params for " + dataType + ": properties is nil")
+	}
+	p := make(map[string]interface{})
+	mergeProperties(p, properties)
+	return ta.add(accountId, distinctId, dataType, "", "", p)
 }
 
 // 立即开始数据 IO 操作
@@ -160,28 +164,33 @@ func (ta *TDAnalytics) Close() {
 	ta.consumer.Close()
 }
 
-func (ta *TDAnalytics) add(accountId string, distinctId string, dataType string, eventName string, properties map[string]interface{}) error {
+func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
 	if len(accountId) == 0 && len(distinctId) == 0 {
-		return errors.New("Invalid paramters: account_id and distinct_id cannot be empty at the same time")
+		return errors.New("invalid paramters: account_id and distinct_id cannot be empty at the same time")
 	}
 
 	// 获取 properties 中 #ip 值, 如不存在则返回 ""
-	ip := extractIp(properties)
+	ip := extractStringProperty(properties, "#ip")
 
 	// 获取 properties 中 #time 值, 如不存在则返回当前时间
 	eventTime := extractTime(properties)
 
+	firstCheckId := extractStringProperty(properties, "#first_check_id")
+
 	//如果上传#uuid， 只支持UUID标准格式xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx的string类型
-	uuid := extractUUID(properties)
+	uuid := extractStringProperty(properties, "#uuid")
+
 	data := Data{
-		AccountId:  accountId,
-		DistinctId: distinctId,
-		Type:       dataType,
-		Time:       eventTime,
-		EventName:  eventName,
-		Ip:         ip,
-		UUID:       uuid,
-		Properties: properties,
+		AccountId:    accountId,
+		DistinctId:   distinctId,
+		Type:         dataType,
+		Time:         eventTime,
+		EventName:    eventName,
+		EventId:      eventId,
+		FirstCheckId: firstCheckId,
+		Ip:           ip,
+		UUID:         uuid,
+		Properties:   properties,
 	}
 
 	// 检查数据格式, 并将时间类型数据转为符合格式要求的字符串

@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -31,11 +32,11 @@ type batchData struct {
 }
 
 const (
-	DEFAULT_TIME_OUT   = 30000  // 默认超时时长 30 秒
-	DEFAULT_BATCH_SIZE = 20     // 默认批量发送条数
-	MAX_BATCH_SIZE     = 200    // 最大批量发送条数
-	BATCH_CHANNEL_SIZE = 1000   // 数据缓冲区大小, 超过此值时会阻塞
-	DEFAULT_COMPRESS   = true   //默认压缩gzip
+	DEFAULT_TIME_OUT   = 30000 // 默认超时时长 30 秒
+	DEFAULT_BATCH_SIZE = 20    // 默认批量发送条数
+	MAX_BATCH_SIZE     = 200   // 最大批量发送条数
+	BATCH_CHANNEL_SIZE = 1000  // 数据缓冲区大小, 超过此值时会阻塞
+	DEFAULT_COMPRESS   = true  //默认压缩gzip
 
 	TYPE_DATA  batchDataType = 0 // 数据类型
 	TYPE_FLUSH batchDataType = 1 // 立即发送数据
@@ -112,7 +113,7 @@ func initBatchConsumer(serverUrl string, appId string, batchSize int, timeout in
 			if flush && len(buffer) > 0 {
 				jdata, err := json.Marshal(buffer)
 				if err == nil {
-					err = c.send(string(jdata))
+					err = c.send(string(jdata), len(buffer))
 					if err != nil {
 						fmt.Println(err)
 					}
@@ -147,7 +148,7 @@ func (c *BatchConsumer) Close() error {
 	return nil
 }
 
-func (c *BatchConsumer) send(data string) error {
+func (c *BatchConsumer) send(data string, size int) error {
 	var encodedData string
 	var err error
 	var compressType = "gzip"
@@ -166,8 +167,11 @@ func (c *BatchConsumer) send(data string) error {
 	req, _ := http.NewRequest("POST", c.serverUrl, postData)
 	req.Header["appid"] = []string{c.appId}
 	req.Header.Set("user-agent", "ta-go-sdk")
-	req.Header.Set("version", "1.1.1")
+	req.Header.Set("version", SDK_VERSION)
 	req.Header.Set("compress", compressType)
+	req.Header["TA-Integration-Type"] = []string{LIB_NAME}
+	req.Header["TA-Integration-Version"] = []string{SDK_VERSION}
+	req.Header["TA-Integration-Count"] = []string{strconv.Itoa(size)}
 	client := &http.Client{Timeout: c.Timeout}
 	resp, err = client.Do(req)
 

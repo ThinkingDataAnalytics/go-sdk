@@ -24,43 +24,28 @@ func mergeProperties(target, source map[string]interface{}) {
 func extractTime(p map[string]interface{}) string {
 	if t, ok := p["#time"]; ok {
 		delete(p, "#time")
-        switch v:= t.(type){
-         case string:
-            return v
-         case time.Time:
-        	return v.Format(DATE_FORMAT)
-         default:
-            return time.Now().Format(DATE_FORMAT)
-        }
+		switch v := t.(type) {
+		case string:
+			return v
+		case time.Time:
+			return v.Format(DATE_FORMAT)
+		default:
+			return time.Now().Format(DATE_FORMAT)
+		}
 	}
 
 	return time.Now().Format(DATE_FORMAT)
 }
 
-func extractUUID(p map[string]interface{}) string {
-	if t, ok := p["#uuid"]; ok {
-		delete(p, "#uuid")
+func extractStringProperty(p map[string]interface{}, key string) string {
+	if t, ok := p[key]; ok {
+		delete(p, key)
 		v, ok := t.(string)
 		if !ok {
-			fmt.Fprintln(os.Stderr, "Invalid data type for #uuid")
+			fmt.Fprintln(os.Stderr, "Invalid data type for "+key)
 		}
 		return v
 	}
-	return ""
-}
-
-func extractIp(p map[string]interface{}) string {
-	if t, ok := p["#ip"]; ok {
-		delete(p, "#ip")
-
-		v, ok := t.(string)
-		if !ok {
-			fmt.Fprintln(os.Stderr, "Invalid data type for #ip")
-			return ""
-		}
-		return v
-	}
-
 	return ""
 }
 
