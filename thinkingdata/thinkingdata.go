@@ -6,18 +6,18 @@ import (
 )
 
 const (
-	TRACK           = "track"
-	TRACK_UPDATE    = "track_update"
-	TRACK_OVERWRITE = "track_overwrite"
-	USER_SET        = "user_set"
-	USER_UNSET      = "user_unset"
-	USER_SET_ONCE   = "user_setOnce"
-	USER_ADD        = "user_add"
-	USER_APPEND     = "user_append"
-	USER_DEL        = "user_del"
+	Track          = "track"
+	TrackUpdate    = "track_update"
+	TrackOverwrite = "track_overwrite"
+	UserSet        = "user_set"
+	UserUnset      = "user_unset"
+	UserSetOnce    = "user_setOnce"
+	UserAdd        = "user_add"
+	UserAppend     = "user_append"
+	UserDel        = "user_del"
 
-	SDK_VERSION = "1.2.0"
-	LIB_NAME    = "Golang"
+	SdkVersion = "1.3.0"
+	LibName    = "Golang"
 )
 
 // 数据信息
@@ -79,15 +79,15 @@ func (ta *TDAnalytics) ClearSuperProperties() {
 
 // 追踪一个事件
 func (ta *TDAnalytics) Track(accountId, distinctId, eventName string, properties map[string]interface{}) error {
-	return ta.track(accountId, distinctId, TRACK, eventName, "", properties)
+	return ta.track(accountId, distinctId, Track, eventName, "", properties)
 }
 
 func (ta *TDAnalytics) TrackUpdate(accountId, distinctId, eventName, eventId string, properties map[string]interface{}) error {
-	return ta.track(accountId, distinctId, TRACK_UPDATE, eventName, eventId, properties)
+	return ta.track(accountId, distinctId, TrackUpdate, eventName, eventId, properties)
 }
 
 func (ta *TDAnalytics) TrackOverwrite(accountId, distinctId, eventName, eventId string, properties map[string]interface{}) error {
-	return ta.track(accountId, distinctId, TRACK_OVERWRITE, eventName, eventId, properties)
+	return ta.track(accountId, distinctId, TrackOverwrite, eventName, eventId, properties)
 }
 
 func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
@@ -95,13 +95,13 @@ func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId
 		return errors.New("the event name must be provided")
 	}
 
-	if len(eventId) == 0 && dataType != TRACK {
+	if len(eventId) == 0 && dataType != Track {
 		return errors.New("the event id must be provided")
 	}
 
 	p := ta.GetSuperProperties()
-	p["#lib"] = LIB_NAME
-	p["#lib_version"] = SDK_VERSION
+	p["#lib"] = LibName
+	p["#lib_version"] = SdkVersion
 
 	mergeProperties(p, properties)
 
@@ -110,7 +110,7 @@ func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId
 
 // 设置用户属性. 如果同名属性已存在，则用传入的属性覆盖同名属性.
 func (ta *TDAnalytics) UserSet(accountId string, distinctId string, properties map[string]interface{}) error {
-	return ta.user(accountId, distinctId, USER_SET, properties)
+	return ta.user(accountId, distinctId, UserSet, properties)
 }
 
 //删除用户属性
@@ -122,31 +122,31 @@ func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string
 	for _, v := range s {
 		prop[v] = 0
 	}
-	return ta.user(accountId, distinctId, USER_UNSET, prop)
+	return ta.user(accountId, distinctId, UserUnset, prop)
 }
 
 // 设置用户属性. 不会覆盖同名属性.
 func (ta *TDAnalytics) UserSetOnce(accountId string, distinctId string, properties map[string]interface{}) error {
-	return ta.user(accountId, distinctId, USER_SET_ONCE, properties)
+	return ta.user(accountId, distinctId, UserSetOnce, properties)
 }
 
 // 对数值类型的属性做累加操作
 func (ta *TDAnalytics) UserAdd(accountId string, distinctId string, properties map[string]interface{}) error {
-	return ta.user(accountId, distinctId, USER_ADD, properties)
+	return ta.user(accountId, distinctId, UserAdd, properties)
 }
 
 // 对数组类型的属性做追加加操作
 func (ta *TDAnalytics) UserAppend(accountId string, distinctId string, properties map[string]interface{}) error {
-	return ta.user(accountId, distinctId, USER_APPEND, properties)
+	return ta.user(accountId, distinctId, UserAppend, properties)
 }
 
 // 删除用户数据, 之后无法查看用户属性, 但是之前已经入库的事件数据不会被删除. 此操作不可逆
 func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
-	return ta.user(accountId, distinctId, USER_DEL, nil)
+	return ta.user(accountId, distinctId, UserDel, nil)
 }
 
 func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties map[string]interface{}) error {
-	if properties == nil && dataType != USER_DEL {
+	if properties == nil && dataType != UserDel {
 		return errors.New("invalid params for " + dataType + ": properties is nil")
 	}
 	p := make(map[string]interface{})

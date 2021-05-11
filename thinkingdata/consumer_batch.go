@@ -18,33 +18,48 @@ import (
 type BatchConsumer struct {
 	serverUrl string         // 接收端地址
 	appId     string         // 项目 APP ID
-	Timeout   time.Duration  // 网络请求超时时间, 单位毫秒
-	compress  bool           //是否数据压缩
+	timeout   time.Duration  // 网络请求超时时间, 单位毫秒
+	compress  bool           // 是否数据压缩
 	ch        chan batchData // 数据传输信道
 	wg        sync.WaitGroup
+	isClosed  bool // 是否关闭
+}
+
+type BatchConfig struct {
+	ServerUrl string // 接收端地址
+	AppId     string // 项目 APP ID
+	BatchSize int    // 批量上传数目
+	Timeout   int    // 网络请求超时时间, 单位毫秒
+	Compress  bool   // 是否数据压缩
+	AutoFlush bool   // 自动上传
+	Interval  int    // 自动上传间隔，单位秒
 }
 
 // 内部数据传输信道的数据结构, 内部 Go 程接收并处理
 type batchDataType int
 type batchData struct {
 	t batchDataType // 数据类型
-	d Data          // 数据，当 t 为 TYPE_DATA 时有效
+	d Data          // 数据，当 t 为 TypeData 时有效
 }
 
 const (
-	DEFAULT_TIME_OUT   = 30000 // 默认超时时长 30 秒
-	DEFAULT_BATCH_SIZE = 20    // 默认批量发送条数
-	MAX_BATCH_SIZE     = 200   // 最大批量发送条数
-	BATCH_CHANNEL_SIZE = 1000  // 数据缓冲区大小, 超过此值时会阻塞
-	DEFAULT_COMPRESS   = true  //默认压缩gzip
+	DefaultTimeOut   = 30000 // 默认超时时长 30 秒
+	DefaultBatchSize = 20    // 默认批量发送条数
+	MaxBatchSize     = 200   // 最大批量发送条数
+	DefaultInterval  = 30    // 默认自动上传间隔 30 秒
 
-	TYPE_DATA  batchDataType = 0 // 数据类型
-	TYPE_FLUSH batchDataType = 1 // 立即发送数据
+	TypeData  batchDataType = 0 // 数据类型
+	TypeFlush batchDataType = 1 // 立即发送数据
 )
 
 // 创建 BatchConsumer
 func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
-	return initBatchConsumer(serverUrl, appId, DEFAULT_BATCH_SIZE, DEFAULT_TIME_OUT, DEFAULT_COMPRESS)
+	config := BatchConfig{
+		ServerUrl: serverUrl,
+		AppId:     appId,
+		Compress:  true,
+	}
+	return initBatchConsumer(config)
 }
 
 // 创建指定批量发送条数的 BatchConsumer
@@ -52,7 +67,13 @@ func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
 // appId 项目的 APP ID
 // batchSize 批量发送条数
 func NewBatchConsumerWithBatchSize(serverUrl string, appId string, batchSize int) (Consumer, error) {
-	return initBatchConsumer(serverUrl, appId, batchSize, DEFAULT_TIME_OUT, DEFAULT_COMPRESS)
+	config := BatchConfig{
+		ServerUrl: serverUrl,
+		AppId:     appId,
+		Compress:  true,
+		BatchSize: batchSize,
+	}
+	return initBatchConsumer(config)
 }
 
 // 创建指定压缩形式的 BatchConsumer
@@ -60,28 +81,70 @@ func NewBatchConsumerWithBatchSize(serverUrl string, appId string, batchSize int
 // appId 项目的 APP ID
 // compress 是否压缩数据
 func NewBatchConsumerWithCompress(serverUrl string, appId string, compress bool) (Consumer, error) {
-	return initBatchConsumer(serverUrl, appId, DEFAULT_BATCH_SIZE, DEFAULT_TIME_OUT, compress)
+	config := BatchConfig{
+		ServerUrl: serverUrl,
+		AppId:     appId,
+		Compress:  compress,
+	}
+	return initBatchConsumer(config)
 }
 
-func initBatchConsumer(serverUrl string, appId string, batchSize int, timeout int, compress bool) (Consumer, error) {
-	u, err := url.Parse(serverUrl)
+func NewBatchConsumerWithConfig(config BatchConfig) (Consumer, error) {
+	return initBatchConsumer(config)
+}
+
+func initBatchConsumer(config BatchConfig) (Consumer, error) {
+	u, err := url.Parse(config.ServerUrl)
 	if err != nil {
 		return nil, err
 	}
 	u.Path = "/sync_server"
 
-	if batchSize > MAX_BATCH_SIZE {
-		batchSize = MAX_BATCH_SIZE
+	var batchSize int
+	if config.BatchSize > MaxBatchSize {
+		batchSize = MaxBatchSize
+	} else if config.BatchSize <= 0 {
+		batchSize = DefaultBatchSize
+	} else {
+		batchSize = config.BatchSize
 	}
+
+	var timeout int
+	if config.Timeout == 0 {
+		timeout = DefaultTimeOut
+	} else {
+		timeout = config.Timeout
+	}
+
 	c := &BatchConsumer{
 		serverUrl: u.String(),
-		appId:     appId,
-		Timeout:   time.Duration(timeout) * time.Millisecond,
-		compress:  compress,
-		ch:        make(chan batchData, CHANNEL_SIZE),
+		appId:     config.AppId,
+		timeout:   time.Duration(timeout) * time.Millisecond,
+		compress:  config.Compress,
+		ch:        make(chan batchData, ChannelSize),
 	}
 
 	c.wg.Add(1)
+
+	var interval int
+	if config.Interval == 0 {
+		interval = DefaultInterval
+	} else {
+		interval = config.Interval
+	}
+	if config.AutoFlush {
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		go func() {
+			for {
+				<-ticker.C
+				_ = c.Flush()
+				if c.isClosed {
+					ticker.Stop()
+				}
+			}
+
+		}()
+	}
 
 	go func() {
 		buffer := make([]Data, 0, batchSize)
@@ -99,9 +162,9 @@ func initBatchConsumer(serverUrl string, appId string, batchSize int, timeout in
 				}
 
 				switch rec.t {
-				case TYPE_FLUSH:
+				case TypeFlush:
 					flush = true
-				case TYPE_DATA:
+				case TypeData:
 					buffer = append(buffer, rec.d)
 					if len(buffer) >= batchSize {
 						flush = true
@@ -128,7 +191,7 @@ func initBatchConsumer(serverUrl string, appId string, batchSize int, timeout in
 
 func (c *BatchConsumer) Add(d Data) error {
 	c.ch <- batchData{
-		t: TYPE_DATA,
+		t: TypeData,
 		d: d,
 	}
 	return nil
@@ -136,7 +199,7 @@ func (c *BatchConsumer) Add(d Data) error {
 
 func (c *BatchConsumer) Flush() error {
 	c.ch <- batchData{
-		t: TYPE_FLUSH,
+		t: TypeFlush,
 	}
 	return nil
 }
@@ -145,6 +208,7 @@ func (c *BatchConsumer) Close() error {
 	c.Flush()
 	close(c.ch)
 	c.wg.Wait()
+	c.isClosed = true
 	return nil
 }
 
@@ -167,12 +231,12 @@ func (c *BatchConsumer) send(data string, size int) error {
 	req, _ := http.NewRequest("POST", c.serverUrl, postData)
 	req.Header["appid"] = []string{c.appId}
 	req.Header.Set("user-agent", "ta-go-sdk")
-	req.Header.Set("version", SDK_VERSION)
+	req.Header.Set("version", SdkVersion)
 	req.Header.Set("compress", compressType)
-	req.Header["TA-Integration-Type"] = []string{LIB_NAME}
-	req.Header["TA-Integration-Version"] = []string{SDK_VERSION}
+	req.Header["TA-Integration-Type"] = []string{LibName}
+	req.Header["TA-Integration-Version"] = []string{SdkVersion}
 	req.Header["TA-Integration-Count"] = []string{strconv.Itoa(size)}
-	client := &http.Client{Timeout: c.Timeout}
+	client := &http.Client{Timeout: c.timeout}
 	resp, err = client.Do(req)
 
 	if err != nil {

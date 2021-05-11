@@ -5,13 +5,21 @@ ThinkingData Analytics Golang Library 是数数科技提供给客户，方便客
 ### 一、集成 SDK
 
 #### 1. 安装 SDK
-
 ```sh
 # 获取 SDK
 go get github.com/ThinkingDataAnalytics/go-sdk/thinkingdata
 
 # 更新 SDK
 go get -u github.com/ThinkingDataAnalytics/go-sdk/thinkingdata
+```
+
+Module模式：
+```sh
+//在代码文件开头引入thinkingdata
+import	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
+
+# 拉取最新SDK模块
+go mod tidy
 ```
 #### 2. 创建 Consumer
 首先在代码文件开头引入 `thinkingdata`:
@@ -56,6 +64,14 @@ BatchConsumer 会先将数据存放在缓冲区中，当数据条数超过设定
 ```go
 // 创建 BatchConsumer, 指定接收端地址、APP ID、缓冲区大小
 consumer, err := thinkingdata.NewBatchConsumerWithBatchSize("SERVER_URL", "APP_ID", 50)
+// 或者使用config
+config := thinkingdata.BatchConfig{
+    ServerUrl: "SERVER_URL",
+    AppId:     "APP_ID",
+    BatchSize: 50,
+    AutoFlush: true, //开启自动上传功能
+    Interval:  20,   //自动上传间隔，单位：秒
+}
 ```
 
 **(3) DebugConsumer**: 逐条实时向 TA 服务器传输数据，当数据格式错误时会返回详细的错误信息。建议先使用 DebugConsumer 校验数据格式

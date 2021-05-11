@@ -75,7 +75,7 @@ func formatProperties(d *Data) error {
 				return errors.New("Invalid property key: " + k)
 			}
 
-			if d.Type == USER_ADD && isNotNumber(v) {
+			if d.Type == UserAdd && isNotNumber(v) {
 				return errors.New("Invalid property value: only numbers is supported by UserAdd")
 			}
 
@@ -84,8 +84,10 @@ func formatProperties(d *Data) error {
 			case bool:
 			case string:
 			case []string:
-			case time.Time: //only support time.Time
+			case time.Time:
 				d.Properties[k] = v.(time.Time).Format(DATE_FORMAT)
+			case *time.Time:
+				d.Properties[k] = v.(*time.Time).Format(DATE_FORMAT)
 			default:
 				if isNotNumber(v) {
 					return errors.New("Invalid property value type. Supported types: numbers, string, time.Time, bool, []string")

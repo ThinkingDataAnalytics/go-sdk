@@ -12,39 +12,33 @@ import (
 type RotateMode int32
 
 const (
-	CHANNEL_SIZE             = 1000 // channel 缓冲区
+	ChannelSize              = 1000 // channel 缓冲区
 	ROTATE_DAILY  RotateMode = 0    // 按天切分
 	ROTATE_HOURLY RotateMode = 1    // 按小时切分
 )
 
 type LogConsumer struct {
-	directory   string      // 日志文件存放目录
-	dateFormat  string      // 与日志切分有关的时间格式
-	fileSize    int64       // 单个日志文件大小，单位 Byte
-	currentFile *os.File    // 当前日志文件
-	ch          chan string // 数据传输信道
-	wg          sync.WaitGroup
+	directory      string      // 日志文件存放目录
+	dateFormat     string      // 与日志切分有关的时间格式
+	fileSize       int64       // 单个日志文件大小，单位 Byte
+	fileNamePrefix string      // 日志文件前缀名
+	currentFile    *os.File    // 当前日志文件
+	ch             chan string // 数据传输信道
+	wg             sync.WaitGroup
+}
+
+type LogConfig struct {
+	Directory      string     // 日志文件存放目录
+	RotateMode     RotateMode // 与日志切分有关的时间格式
+	FileSize       int        // 单个日志文件大小，单位 Byte
+	FileNamePrefix string     // 日志文件前缀名
+	AutoFlush      bool       // 自动上传
+	Interval       int        // 自动上传间隔
 }
 
 // 创建 LogConsumer. 传入日志目录和切分模式
 func NewLogConsumer(directory string, r RotateMode) (Consumer, error) {
-	var df string
-	switch r {
-	case ROTATE_DAILY:
-		df = "2006-01-02"
-	case ROTATE_HOURLY:
-		df = "2006-01-02-15"
-	default:
-		return nil, errors.New("Unknown rotate mode.")
-	}
-
-	c := &LogConsumer{
-		directory:  directory,
-		dateFormat: df,
-		fileSize:   0, // 默认情况下不限制文件大小
-		ch:         make(chan string, CHANNEL_SIZE),
-	}
-	return c, c.init()
+	return NewLogConsumerWithFileSize(directory, r, 0)
 }
 
 // 创建 LogConsumer. 传入日志目录和切分模式和单个文件大小限制
@@ -52,8 +46,17 @@ func NewLogConsumer(directory string, r RotateMode) (Consumer, error) {
 // r: 文件切分模式(按日切分、按小时切分)
 // size: 但个日志文件上限，单位 MB
 func NewLogConsumerWithFileSize(directory string, r RotateMode, size int) (Consumer, error) {
+	config := LogConfig{
+		Directory:  directory,
+		RotateMode: r,
+		FileSize:   size,
+	}
+	return NewLogConsumerWithConfig(config)
+}
+
+func NewLogConsumerWithConfig(config LogConfig) (Consumer, error) {
 	var df string
-	switch r {
+	switch config.RotateMode {
 	case ROTATE_DAILY:
 		df = "2006-01-02"
 	case ROTATE_HOURLY:
@@ -62,15 +65,12 @@ func NewLogConsumerWithFileSize(directory string, r RotateMode, size int) (Consu
 		return nil, errors.New("Unknown rotate mode.")
 	}
 
-	if size < 0 {
-		size = 0
-	}
-
 	c := &LogConsumer{
-		directory:  directory,
-		dateFormat: df,
-		fileSize:   int64(size * 1024 * 1024),
-		ch:         make(chan string, CHANNEL_SIZE),
+		directory:      config.Directory,
+		dateFormat:     df,
+		fileSize:       int64(config.FileSize * 1024 * 1024),
+		fileNamePrefix: config.FileNamePrefix,
+		ch:             make(chan string, ChannelSize),
 	}
 	return c, c.init()
 }
@@ -97,17 +97,28 @@ func (c *LogConsumer) Close() error {
 }
 
 func (c *LogConsumer) constructFileName(i int) string {
+	fileNamePrefix := ""
+	if len(c.fileNamePrefix) != 0 {
+		fileNamePrefix = c.fileNamePrefix + "."
+	}
 	if c.fileSize > 0 {
-		return fmt.Sprintf("%s/log.%s_%d", c.directory, time.Now().Format(c.dateFormat), i)
+		return fmt.Sprintf("%s/%slog.%s_%d", c.directory, fileNamePrefix, time.Now().Format(c.dateFormat), i)
 	} else {
-		return fmt.Sprintf("%s/log.%s", c.directory, time.Now().Format(c.dateFormat))
+		return fmt.Sprintf("%s/%slog.%s", c.directory, fileNamePrefix, time.Now().Format(c.dateFormat))
 	}
 }
 
 // 开启一个 Go 程从信道中读入数据，并写入文件
 func (c *LogConsumer) init() error {
-	i := 0
-	fd, err := os.OpenFile(c.constructFileName(i), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	//判断目录是否存在
+	_, err := os.Stat(c.directory)
+	if err != nil && os.IsNotExist(err) {
+		e := os.MkdirAll(c.directory, os.ModePerm)
+		if e != nil {
+			return e
+		}
+	}
+	fd, err := os.OpenFile(c.constructFileName(0), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		fmt.Printf("open failed: %s\n", err)
 		return err
@@ -124,7 +135,7 @@ func (c *LogConsumer) init() error {
 			}
 			c.wg.Done()
 		}()
-
+		i := 0
 		for {
 			select {
 			case rec, ok := <-c.ch:

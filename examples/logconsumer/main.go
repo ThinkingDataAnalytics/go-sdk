@@ -10,10 +10,14 @@ import (
 func main() {
 	wg := sync.WaitGroup{}
 	// 创建按小时切分的 log consumer, 日志文件存放在当前目录
-	// consumer, _ := thinkingdata.NewLogConsumerWithFileSize(".", thinkingdata.ROTATE_HOURLY, 10)
-
+	// consumer, _ := thinkingdata.NewLogConsumerWithFileSize(".", thinkingdata., 10)
 	// 创建按天切分的 log consumer, 不设置单个日志上限
-	consumer, _ := thinkingdata.NewLogConsumer(".", thinkingdata.ROTATE_DAILY)
+	config := thinkingdata.LogConfig{
+		FileNamePrefix: "test",
+		Directory:      "/Users/sunzeyu/Work/test/test",
+		//Progress:       true,
+	}
+	consumer, _ := thinkingdata.NewLogConsumerWithConfig(config)
 	ta := thinkingdata.New(consumer)
 
 	ta.SetSuperProperties(map[string]interface{}{
@@ -27,6 +31,7 @@ func main() {
 		wg.Add(1)
 		go func(threadName string) {
 			defer wg.Done()
+			var ta thinkingdata.TDAnalytics
 
 			account_id := threadName
 			distinct_id := "ABCDEF123456"
@@ -40,7 +45,7 @@ func main() {
 				"catalog": "a",
 				"is_boo":  true,
 			}
-			for i := 0; i < 20; i++ {
+			for i := 0; i < 100; i++ {
 
 				// track事件
 				err := ta.Track(account_id, distinct_id, "view_page", properties)
