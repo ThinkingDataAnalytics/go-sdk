@@ -11,45 +11,42 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 type BatchConsumer struct {
-	serverUrl string         // 接收端地址
-	appId     string         // 项目 APP ID
-	timeout   time.Duration  // 网络请求超时时间, 单位毫秒
-	compress  bool           // 是否数据压缩
-	ch        chan batchData // 数据传输信道
-	wg        sync.WaitGroup
-	isClosed  bool // 是否关闭
+	serverUrl   string        // 接收端地址
+	appId       string        // 项目 APP ID
+	timeout     time.Duration // 网络请求超时时间, 单位毫秒
+	compress    bool          // 是否数据压缩
+	bufferMutex *sync.Mutex
+	cacheMutex  *sync.Mutex // 缓存锁
+
+	buffer        []Data
+	batchSize     int
+	cacheBuffer   [][]Data // 缓存
+	cacheCapacity int      // 缓存最大容量
 }
 
 type BatchConfig struct {
-	ServerUrl string // 接收端地址
-	AppId     string // 项目 APP ID
-	BatchSize int    // 批量上传数目
-	Timeout   int    // 网络请求超时时间, 单位毫秒
-	Compress  bool   // 是否数据压缩
-	AutoFlush bool   // 自动上传
-	Interval  int    // 自动上传间隔，单位秒
-}
-
-// 内部数据传输信道的数据结构, 内部 Go 程接收并处理
-type batchDataType int
-type batchData struct {
-	t batchDataType // 数据类型
-	d Data          // 数据，当 t 为 TypeData 时有效
+	ServerUrl     string // 接收端地址
+	AppId         string // 项目 APP ID
+	BatchSize     int    // 批量上传数目
+	Timeout       int    // 网络请求超时时间, 单位毫秒
+	Compress      bool   // 是否数据压缩
+	AutoFlush     bool   // 自动上传
+	Interval      int    // 自动上传间隔，单位秒
+	CacheCapacity int    // 缓存最大容量
 }
 
 const (
-	DefaultTimeOut   = 30000 // 默认超时时长 30 秒
-	DefaultBatchSize = 20    // 默认批量发送条数
-	MaxBatchSize     = 200   // 最大批量发送条数
-	DefaultInterval  = 30    // 默认自动上传间隔 30 秒
-
-	TypeData  batchDataType = 0 // 数据类型
-	TypeFlush batchDataType = 1 // 立即发送数据
+	DefaultTimeOut       = 30000 // 默认超时时长 30 秒
+	DefaultBatchSize     = 20    // 默认批量发送条数
+	MaxBatchSize         = 200   // 最大批量发送条数
+	DefaultInterval      = 30    // 默认自动上传间隔 30 秒
+	DefaultCacheCapacity = 50
 )
 
 // 创建 BatchConsumer
@@ -94,6 +91,9 @@ func NewBatchConsumerWithConfig(config BatchConfig) (Consumer, error) {
 }
 
 func initBatchConsumer(config BatchConfig) (Consumer, error) {
+	if config.ServerUrl == "" {
+		return nil, errors.New(fmt.Sprint("ServerUrl 不能为空"))
+	}
 	u, err := url.Parse(config.ServerUrl)
 	if err != nil {
 		return nil, err
@@ -109,6 +109,13 @@ func initBatchConsumer(config BatchConfig) (Consumer, error) {
 		batchSize = config.BatchSize
 	}
 
+	var cacheCapacity int
+	if config.CacheCapacity <= 0 {
+		cacheCapacity = DefaultCacheCapacity
+	} else {
+		cacheCapacity = config.CacheCapacity
+	}
+
 	var timeout int
 	if config.Timeout == 0 {
 		timeout = DefaultTimeOut
@@ -117,14 +124,17 @@ func initBatchConsumer(config BatchConfig) (Consumer, error) {
 	}
 
 	c := &BatchConsumer{
-		serverUrl: u.String(),
-		appId:     config.AppId,
-		timeout:   time.Duration(timeout) * time.Millisecond,
-		compress:  config.Compress,
-		ch:        make(chan batchData, ChannelSize),
+		serverUrl:     u.String(),
+		appId:         config.AppId,
+		timeout:       time.Duration(timeout) * time.Millisecond,
+		compress:      config.Compress,
+		bufferMutex:   new(sync.Mutex),
+		cacheMutex:    new(sync.Mutex),
+		batchSize:     batchSize,
+		buffer:        make([]Data, 0, batchSize),
+		cacheCapacity: cacheCapacity,
+		cacheBuffer:   make([][]Data, 0, cacheCapacity),
 	}
-
-	c.wg.Add(1)
 
 	var interval int
 	if config.Interval == 0 {
@@ -133,88 +143,99 @@ func initBatchConsumer(config BatchConfig) (Consumer, error) {
 		interval = config.Interval
 	}
 	if config.AutoFlush {
-		ticker := time.NewTicker(time.Duration(interval) * time.Second)
 		go func() {
+			ticker := time.NewTicker(time.Duration(interval) * time.Second)
+			defer ticker.Stop()
 			for {
 				<-ticker.C
 				_ = c.Flush()
-				if c.isClosed {
-					ticker.Stop()
-				}
 			}
 
 		}()
 	}
-
-	go func() {
-		buffer := make([]Data, 0, batchSize)
-
-		defer func() {
-			c.wg.Done()
-		}()
-
-		for {
-			flush := false
-			select {
-			case rec, ok := <-c.ch:
-				if !ok {
-					return
-				}
-
-				switch rec.t {
-				case TypeFlush:
-					flush = true
-				case TypeData:
-					buffer = append(buffer, rec.d)
-					if len(buffer) >= batchSize {
-						flush = true
-					}
-				}
-			}
-
-			// 上传数据到服务端, 不会重试
-			if flush && len(buffer) > 0 {
-				jdata, err := json.Marshal(buffer)
-				if err == nil {
-					err = c.send(string(jdata), len(buffer))
-					if err != nil {
-						fmt.Println(err)
-					}
-				}
-				buffer = buffer[:0]
-				flush = false
-			}
-		}
-	}()
 	return c, nil
 }
 
 func (c *BatchConsumer) Add(d Data) error {
-	c.ch <- batchData{
-		t: TypeData,
-		d: d,
+	c.bufferMutex.Lock()
+	c.buffer = append(c.buffer, d)
+	c.bufferMutex.Unlock()
+	if len(c.buffer) >= c.batchSize || len(c.cacheBuffer) > 0 {
+		err := c.Flush()
+		return err
 	}
 	return nil
 }
 
 func (c *BatchConsumer) Flush() error {
-	c.ch <- batchData{
-		t: TypeFlush,
+	if len(c.buffer) == 0 && len(c.cacheBuffer) == 0 {
+		return nil
+	}
+
+	defer func() {
+		if len(c.cacheBuffer) > c.cacheCapacity {
+			c.cacheBuffer = c.cacheBuffer[1:]
+		}
+	}()
+
+	c.cacheMutex.Lock()
+	defer c.cacheMutex.Unlock()
+	c.bufferMutex.Lock()
+	if len(c.cacheBuffer) == 0 || len(c.buffer) >= c.batchSize {
+		c.cacheBuffer = append(c.cacheBuffer, c.buffer)
+		c.buffer = make([]Data, 0, c.batchSize)
+	}
+	c.bufferMutex.Unlock()
+
+	buffer := c.cacheBuffer[0]
+
+	jdata, err := json.Marshal(buffer)
+	if err == nil {
+		for i := 0; i < 3; i++ {
+			statusCode, code, err := c.send(string(jdata), len(buffer))
+			if statusCode == 200 {
+				c.cacheBuffer = c.cacheBuffer[1:]
+				switch code {
+				case 0:
+					return nil
+				case 1, -1:
+					return fmt.Errorf("ThinkingDataError:invalid data format")
+				case -2:
+					return fmt.Errorf("ThinkingDataError:APP ID doesn't exist")
+				case -3:
+					return fmt.Errorf("ThinkingDataError:invalid ip transmission")
+				default:
+					return fmt.Errorf("ThinkingDataError:unknown error")
+				}
+			}
+			if err != nil {
+				if i == 2 {
+					return err
+				}
+			}
+		}
+	}
+
+	return err
+}
+
+func (c *BatchConsumer) FlushAll() error {
+	for len(c.cacheBuffer) > 0 || len(c.buffer) > 0 {
+		if err := c.Flush(); err != nil {
+			if !strings.Contains(err.Error(), "ThinkingDataError") {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
 func (c *BatchConsumer) Close() error {
-	c.Flush()
-	close(c.ch)
-	c.wg.Wait()
-	c.isClosed = true
-	return nil
+	return c.FlushAll()
 }
 
-func (c *BatchConsumer) send(data string, size int) error {
+func (c *BatchConsumer) send(data string, size int) (statusCode int, code int, err error) {
 	var encodedData string
-	var err error
 	var compressType = "gzip"
 	if c.compress {
 		encodedData, err = encodeData(data)
@@ -223,7 +244,7 @@ func (c *BatchConsumer) send(data string, size int) error {
 		compressType = "none"
 	}
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	postData := bytes.NewBufferString(encodedData)
 
@@ -240,7 +261,7 @@ func (c *BatchConsumer) send(data string, size int) error {
 	resp, err = client.Do(req)
 
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 
 	defer resp.Body.Close()
@@ -253,16 +274,13 @@ func (c *BatchConsumer) send(data string, size int) error {
 
 		err = json.Unmarshal(body, &result)
 		if err != nil {
-			return err
+			return resp.StatusCode, 1, err
 		}
 
-		if result.Code != 0 {
-			return errors.New(fmt.Sprintf("send to receiver failed with return code: %d", result.Code))
-		}
+		return resp.StatusCode, result.Code, nil
 	} else {
-		return errors.New(fmt.Sprintf("Unexpected Status Code: %d", resp.StatusCode))
+		return resp.StatusCode, -1, nil
 	}
-	return nil
 }
 
 // Gzip 压缩

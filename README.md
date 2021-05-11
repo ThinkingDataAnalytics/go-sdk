@@ -53,7 +53,7 @@ consumer, err := thinkingdata.NewLogConsumerWithFileSize("/path/to/data", thinki
 ```
 传入的参数为写入本地的文件夹地址，您只需将 LogBus 的监听文件夹地址设置为此处的地址，即可使用 LogBus 进行数据的监听上传.
 
-**(2) BatchConsumer**: 批量实时地向 TA 服务器传输数据，不需要搭配传输工具，不建议在生产环境中使用，不支持多线程
+**(2) BatchConsumer**: 批量实时地向 TA 服务器传输数据，不需要搭配传输工具
 ```go
 // 创建 BatchConsumer, 指定接收端地址、APP ID
 consumer, err := thinkingdata.NewBatchConsumer("SERVER_URL", "APP_ID")

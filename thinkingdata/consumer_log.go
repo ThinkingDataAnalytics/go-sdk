@@ -44,7 +44,7 @@ func NewLogConsumer(directory string, r RotateMode) (Consumer, error) {
 // 创建 LogConsumer. 传入日志目录和切分模式和单个文件大小限制
 // directory: 日志文件存放目录
 // r: 文件切分模式(按日切分、按小时切分)
-// size: 但个日志文件上限，单位 MB
+// size: 单个日志文件上限，单位 MB
 func NewLogConsumerWithFileSize(directory string, r RotateMode, size int) (Consumer, error) {
 	config := LogConfig{
 		Directory:  directory,
@@ -86,8 +86,7 @@ func (c *LogConsumer) Add(d Data) error {
 }
 
 func (c *LogConsumer) Flush() error {
-	c.currentFile.Sync()
-	return nil
+	return c.currentFile.Sync()
 }
 
 func (c *LogConsumer) Close() error {

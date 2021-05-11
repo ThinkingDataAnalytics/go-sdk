@@ -11,14 +11,13 @@ func main() {
 	wg := sync.WaitGroup{}
 	// 创建 BatchConsumer, 指定接收端地址、APP ID、上报批次
 	config := thinkingdata.BatchConfig{
-		ServerUrl: "http://localhost:8090",
-		AppId:     "test1",
+		ServerUrl: "http://ip:port",
+		AppId:     "test",
 		AutoFlush: true,
 		BatchSize: 100,
 		Interval:  20,
 	}
 	consumer, err := thinkingdata.NewBatchConsumerWithConfig(config)
-	// consumer, err := thinkingdata.NewBatchConsumerWithCompress("url", "appid",false)
 	if err != nil {
 		fmt.Println(err)
 		return
