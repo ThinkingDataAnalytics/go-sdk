@@ -155,13 +155,13 @@ func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties m
 }
 
 // 立即开始数据 IO 操作
-func (ta *TDAnalytics) Flush() {
-	ta.consumer.Flush()
+func (ta *TDAnalytics) Flush() error {
+	return ta.consumer.Flush()
 }
 
 // 关闭 TDAnalytics
-func (ta *TDAnalytics) Close() {
-	ta.consumer.Close()
+func (ta *TDAnalytics) Close() error {
+	return ta.consumer.Close()
 }
 
 func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {

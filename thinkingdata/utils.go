@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"regexp"
 	"time"
 )
@@ -84,19 +85,31 @@ func formatProperties(d *Data) error {
 			case bool:
 			case string:
 			case []string:
+			case []interface{}:
 			case time.Time:
 				d.Properties[k] = v.(time.Time).Format(DATE_FORMAT)
 			case *time.Time:
 				d.Properties[k] = v.(*time.Time).Format(DATE_FORMAT)
 			default:
-				if isNotNumber(v) {
-					return errors.New("Invalid property value type. Supported types: numbers, string, time.Time, bool, []string")
+				if isNotNumber(v) && isNotArrayOrSlice(v) {
+					return errors.New("Invalid property value type. Supported types: numbers, string, time.Time, bool, array, slice")
 				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func isNotArrayOrSlice(v interface{}) bool {
+	typeOf := reflect.TypeOf(v)
+	switch typeOf.Kind() {
+	case reflect.Array:
+	case reflect.Slice:
+	default:
+		return true
+	}
+	return false
 }
 
 func checkPattern(name []byte) bool {

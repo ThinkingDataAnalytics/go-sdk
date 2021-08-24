@@ -1,3 +1,7 @@
+**v1.4.1** (2021/08/24)
+- 优化：properties里支持array类型和slice类型
+- 优化：Flush()和Close()增加失败时返回error
+
 **v1.4.0** (2021/05/10)
 - BatchConsumer 优化：增加缓存，在网络连接中断时缓存数据
 
