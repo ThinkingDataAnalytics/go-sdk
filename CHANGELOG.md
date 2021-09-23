@@ -1,3 +1,6 @@
+**v1.4.2** (2021/09/23)
+- BatchConsumer 修复：修复多线程Add数据时可能会错误的问题
+
 **v1.4.1** (2021/08/24)
 - 优化：properties里支持array类型和slice类型
 - 优化：Flush()和Close()增加失败时返回error

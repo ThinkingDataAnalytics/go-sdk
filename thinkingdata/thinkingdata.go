@@ -16,11 +16,11 @@ const (
 	UserAppend     = "user_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "1.4.0"
+	SdkVersion = "1.4.2"
 	LibName    = "Golang"
 )
 
-// 数据信息
+// Data 数据信息
 type Data struct {
 	AccountId    string                 `json:"#account_id,omitempty"`
 	DistinctId   string                 `json:"#distinct_id,omitempty"`
@@ -47,14 +47,14 @@ type TDAnalytics struct {
 	mutex           *sync.RWMutex
 }
 
-// 初始化 TDAnalytics
+// New 初始化 TDAnalytics
 func New(c Consumer) TDAnalytics {
 	return TDAnalytics{consumer: c,
 		superProperties: make(map[string]interface{}),
 		mutex:           new(sync.RWMutex)}
 }
 
-// 返回公共事件属性
+// GetSuperProperties 返回公共事件属性
 func (ta *TDAnalytics) GetSuperProperties() map[string]interface{} {
 	result := make(map[string]interface{})
 	ta.mutex.RLock()
@@ -63,21 +63,21 @@ func (ta *TDAnalytics) GetSuperProperties() map[string]interface{} {
 	return result
 }
 
-// 设置公共事件属性
+// SetSuperProperties 设置公共事件属性
 func (ta *TDAnalytics) SetSuperProperties(superProperties map[string]interface{}) {
 	ta.mutex.Lock()
 	mergeProperties(ta.superProperties, superProperties)
 	ta.mutex.Unlock()
 }
 
-// 清除公共事件属性
+// ClearSuperProperties 清除公共事件属性
 func (ta *TDAnalytics) ClearSuperProperties() {
 	ta.mutex.Lock()
 	ta.superProperties = make(map[string]interface{})
 	ta.mutex.Unlock()
 }
 
-// 追踪一个事件
+// Track 追踪一个事件
 func (ta *TDAnalytics) Track(accountId, distinctId, eventName string, properties map[string]interface{}) error {
 	return ta.track(accountId, distinctId, Track, eventName, "", properties)
 }
@@ -108,12 +108,12 @@ func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId
 	return ta.add(accountId, distinctId, dataType, eventName, eventId, p)
 }
 
-// 设置用户属性. 如果同名属性已存在，则用传入的属性覆盖同名属性.
+// UserSet 设置用户属性. 如果同名属性已存在，则用传入的属性覆盖同名属性.
 func (ta *TDAnalytics) UserSet(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserSet, properties)
 }
 
-//删除用户属性
+// UserUnset 删除用户属性
 func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string) error {
 	if len(s) == 0 {
 		return errors.New("invalid params for UserUnset: properties is nil")
@@ -125,22 +125,22 @@ func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string
 	return ta.user(accountId, distinctId, UserUnset, prop)
 }
 
-// 设置用户属性. 不会覆盖同名属性.
+// UserSetOnce 设置用户属性. 不会覆盖同名属性.
 func (ta *TDAnalytics) UserSetOnce(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserSetOnce, properties)
 }
 
-// 对数值类型的属性做累加操作
+// UserAdd 对数值类型的属性做累加操作
 func (ta *TDAnalytics) UserAdd(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserAdd, properties)
 }
 
-// 对数组类型的属性做追加加操作
+// UserAppend 对数组类型的属性做追加加操作
 func (ta *TDAnalytics) UserAppend(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserAppend, properties)
 }
 
-// 删除用户数据, 之后无法查看用户属性, 但是之前已经入库的事件数据不会被删除. 此操作不可逆
+// UserDelete 删除用户数据, 之后无法查看用户属性, 但是之前已经入库的事件数据不会被删除. 此操作不可逆
 func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
 	return ta.user(accountId, distinctId, UserDel, nil)
 }
@@ -154,12 +154,12 @@ func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties m
 	return ta.add(accountId, distinctId, dataType, "", "", p)
 }
 
-// 立即开始数据 IO 操作
+// Flush 立即开始数据 IO 操作
 func (ta *TDAnalytics) Flush() error {
 	return ta.consumer.Flush()
 }
 
-// 关闭 TDAnalytics
+// Close 关闭 TDAnalytics
 func (ta *TDAnalytics) Close() error {
 	return ta.consumer.Close()
 }

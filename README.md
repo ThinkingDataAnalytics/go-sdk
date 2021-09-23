@@ -82,7 +82,7 @@ consumer, _ := thinkingdata.NewDebugConsumer("SERVER_URL", "APP_ID")
 #### 3. 创建 SDK 实例
 传入创建好的 consumer，即可得到对应的 TDAnalytics 实例:
 ```go
-ta, err := thinkingdata.New(consumer)
+ta = thinkingdata.New(consumer)
 ```
 后续即可使用 ta 的接口来上报数据.
 

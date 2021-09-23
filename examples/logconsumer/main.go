@@ -30,10 +30,16 @@ func main() {
 		//"#time":time.Now(),
 		"update_time": time.Now(),
 		// "#ip" 属性是系统预置属性，如果服务端中能获取用户 IP 地址，并填入该属性，数数会自动根据 IP 地址解析用户的省份、城市信息
-		"#ip":     "123.123.123.123",
-		"id":      "22",
-		"catalog": "a",
-		"is_boo":  true,
+		"#ip":             "123.123.123.123",
+		"id":              "22",
+		"catalog":         "a",
+		"is_boo":          true,
+		"detect_results":  []string{"不通过"},
+		"detect_type":     "image",
+		"detect_way":      "YIDun",
+		"label":           []string{"涉政"},
+		"process_results": []string{"强制手机验证"},
+		"source":          "group_chat",
 	}
 	for i := 0; i < 100; i++ {
 

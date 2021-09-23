@@ -92,7 +92,8 @@ func formatProperties(d *Data) error {
 				d.Properties[k] = v.(*time.Time).Format(DATE_FORMAT)
 			default:
 				if isNotNumber(v) && isNotArrayOrSlice(v) {
-					return errors.New("Invalid property value type. Supported types: numbers, string, time.Time, bool, array, slice")
+					errorMsg := fmt.Sprintf("%v Invalid property value type. Supported types: numbers, string, time.Time, bool, array, slice", v)
+					return errors.New(errorMsg)
 				}
 			}
 		}

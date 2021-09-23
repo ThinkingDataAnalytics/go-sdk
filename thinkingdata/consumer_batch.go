@@ -21,8 +21,8 @@ type BatchConsumer struct {
 	appId       string        // 项目 APP ID
 	timeout     time.Duration // 网络请求超时时间, 单位毫秒
 	compress    bool          // 是否数据压缩
-	bufferMutex *sync.Mutex
-	cacheMutex  *sync.Mutex // 缓存锁
+	bufferMutex *sync.RWMutex
+	cacheMutex  *sync.RWMutex // 缓存锁
 
 	buffer        []Data
 	batchSize     int
@@ -128,8 +128,8 @@ func initBatchConsumer(config BatchConfig) (Consumer, error) {
 		appId:         config.AppId,
 		timeout:       time.Duration(timeout) * time.Millisecond,
 		compress:      config.Compress,
-		bufferMutex:   new(sync.Mutex),
-		cacheMutex:    new(sync.Mutex),
+		bufferMutex:   new(sync.RWMutex),
+		cacheMutex:    new(sync.RWMutex),
 		batchSize:     batchSize,
 		buffer:        make([]Data, 0, batchSize),
 		cacheCapacity: cacheCapacity,
@@ -160,14 +160,22 @@ func (c *BatchConsumer) Add(d Data) error {
 	c.bufferMutex.Lock()
 	c.buffer = append(c.buffer, d)
 	c.bufferMutex.Unlock()
-	if len(c.buffer) >= c.batchSize || len(c.cacheBuffer) > 0 {
+
+	if c.getBufferLength() >= c.batchSize || c.getCacheLength() > 0 {
 		err := c.Flush()
 		return err
 	}
+
 	return nil
 }
 
 func (c *BatchConsumer) Flush() error {
+	c.cacheMutex.Lock()
+	defer c.cacheMutex.Unlock()
+
+	c.bufferMutex.Lock()
+	defer c.bufferMutex.Unlock()
+
 	if len(c.buffer) == 0 && len(c.cacheBuffer) == 0 {
 		return nil
 	}
@@ -178,14 +186,10 @@ func (c *BatchConsumer) Flush() error {
 		}
 	}()
 
-	c.cacheMutex.Lock()
-	defer c.cacheMutex.Unlock()
-	c.bufferMutex.Lock()
 	if len(c.cacheBuffer) == 0 || len(c.buffer) >= c.batchSize {
 		c.cacheBuffer = append(c.cacheBuffer, c.buffer)
 		c.buffer = make([]Data, 0, c.batchSize)
 	}
-	c.bufferMutex.Unlock()
 
 	buffer := c.cacheBuffer[0]
 
@@ -220,7 +224,7 @@ func (c *BatchConsumer) Flush() error {
 }
 
 func (c *BatchConsumer) FlushAll() error {
-	for len(c.cacheBuffer) > 0 || len(c.buffer) > 0 {
+	for c.getCacheLength() > 0 || c.getBufferLength() > 0 {
 		if err := c.Flush(); err != nil {
 			if !strings.Contains(err.Error(), "ThinkingDataError") {
 				return err
@@ -296,4 +300,16 @@ func encodeData(data string) (string, error) {
 	gw.Close()
 
 	return string(buf.Bytes()), nil
+}
+
+func (c *BatchConsumer) getBufferLength() int {
+	c.bufferMutex.RLock()
+	defer c.bufferMutex.RUnlock()
+	return len(c.buffer)
+}
+
+func (c *BatchConsumer) getCacheLength() int {
+	c.cacheMutex.RLock()
+	defer c.cacheMutex.RUnlock()
+	return len(c.cacheBuffer)
 }
