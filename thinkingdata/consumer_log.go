@@ -81,7 +81,11 @@ func (c *LogConsumer) Add(d Data) error {
 		return err
 	}
 
-	c.ch <- string(bdata)
+	select {
+	case c.ch <- string(bdata):
+	default:
+		return errors.New("ta logger channel full")
+	}
 	return nil
 }
 
