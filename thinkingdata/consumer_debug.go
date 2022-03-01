@@ -38,7 +38,7 @@ func (c *DebugConsumer) Add(d Data) error {
 		return err
 	}
 
-	return c.send(string(jdata))
+	return c.send(parseTime(jdata))
 }
 
 func (c *DebugConsumer) Flush() error {

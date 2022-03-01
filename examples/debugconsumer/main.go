@@ -2,9 +2,21 @@ package main
 
 import (
 	"fmt"
-	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
 	"time"
+
+	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
 )
+
+type A struct {
+	Name  string
+	Time  time.Time
+	Event []B
+}
+
+type B struct {
+	Trigger string
+	Time    time.Time
+}
 
 func main() {
 	var err error
@@ -52,20 +64,28 @@ func main() {
 	if err != nil {
 		fmt.Println("user add failed", err)
 	}
-    //用户数组类型追加属性 UserAppend ,为下面两个数组类型添加以下属性，只支持key - []string
-    err = ta.UserAppend(account_id, distinct_id, map[string]interface{}{
-    		"array": []string{"str1","str2"},
-    		"arrkey1":[]string{"str3","str4"},
-    	})
-    if err != nil {
-    	fmt.Println("user add failed", err)
-    }
+	//用户数组类型追加属性 UserAppend ,为下面两个数组类型添加以下属性，只支持key - []string
+	err = ta.UserAppend(account_id, distinct_id, map[string]interface{}{
+		"array":   []string{"str1", "str2"},
+		"arrkey1": []string{"str3", "str4"},
+	})
+	if err != nil {
+		fmt.Println("user add failed", err)
+	}
 	// 设置公共事件属性
 	ta.SetSuperProperties(map[string]interface{}{
 		"super_string": "supervalue",
 		"super_bool":   false,
 	})
-
+	// 自定义类型
+	customData := A{
+		"ThinkingData",
+		time.Now(),
+		[]B{
+			{"Now We Support", time.Now()},
+			{"User Custom Struct Data", time.Now()},
+		},
+	}
 	properties := map[string]interface{}{
 		// "#time" 属性是系统预置属性，传入 datetime 对象，表示事件发生的时间，如果不填入该属性，则默认使用系统当前时间
 		"time_now": time.Now(),
@@ -74,6 +94,7 @@ func main() {
 		"id":      "123",
 		"catalog": "d",
 		"is_bool": true,
+		"my_data": customData,
 	}
 
 	// 记录用户浏览商品事件

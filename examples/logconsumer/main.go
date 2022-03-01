@@ -2,9 +2,21 @@ package main
 
 import (
 	"fmt"
-	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
 	"time"
+
+	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
 )
+
+type A struct {
+	Name  string
+	Time  time.Time
+	Event []B
+}
+
+type B struct {
+	Trigger string
+	Time    time.Time
+}
 
 func main() {
 	// 创建按小时切分的 log consumer, 日志文件存放在当前目录
@@ -13,6 +25,16 @@ func main() {
 		FileNamePrefix: "test",
 		Directory:      "/usr/log",
 	}
+
+	customData := A{
+		"ThinkingData",
+		time.Now(),
+		[]B{
+			{"Now We Support", time.Now()},
+			{"User Custom Struct Data", time.Now()},
+		},
+	}
+
 	consumer, _ := thinkingdata.NewLogConsumerWithConfig(config)
 	ta := thinkingdata.New(consumer)
 
@@ -40,6 +62,7 @@ func main() {
 		"label":           []string{"涉政"},
 		"process_results": []string{"强制手机验证"},
 		"source":          "group_chat",
+		"my_data":         customData,
 	}
 	for i := 0; i < 100; i++ {
 

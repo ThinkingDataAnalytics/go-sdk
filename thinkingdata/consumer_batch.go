@@ -195,8 +195,9 @@ func (c *BatchConsumer) Flush() error {
 
 	jdata, err := json.Marshal(buffer)
 	if err == nil {
+		params := parseTime(jdata)
 		for i := 0; i < 3; i++ {
-			statusCode, code, err := c.send(string(jdata), len(buffer))
+			statusCode, code, err := c.send(params, len(buffer))
 			if statusCode == 200 {
 				c.cacheBuffer = c.cacheBuffer[1:]
 				switch code {

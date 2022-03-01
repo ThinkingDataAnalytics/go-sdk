@@ -81,7 +81,7 @@ func (c *LogConsumer) Add(d Data) error {
 		return err
 	}
 
-	c.ch <- string(bdata)
+	c.ch <- parseTime(bdata)
 	return nil
 }
 

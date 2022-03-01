@@ -2,10 +2,22 @@ package main
 
 import (
 	"fmt"
-	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
 	"sync"
 	"time"
+
+	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
 )
+
+type A struct {
+	Name  string
+	Time  time.Time
+	Event []B
+}
+
+type B struct {
+	Trigger string
+	Time    time.Time
+}
 
 func main() {
 	wg := sync.WaitGroup{}
@@ -21,6 +33,16 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 		return
+	}
+
+	// 创建用户自定义信息类型
+	customData := A{
+		"ThinkingData",
+		time.Now(),
+		[]B{
+			{"Now We Support", time.Now()},
+			{"User Custom Struct Data", time.Now()},
+		},
 	}
 
 	// 创建 TDAnalytics
@@ -51,6 +73,7 @@ func main() {
 				"catalog": "p",
 				"bool":    true,
 				"aa":      12,
+				"my_data": customData,
 			}
 			// track事件
 			err := ta.Track(account_id, distinct_id, "ViewProduct", properties)
