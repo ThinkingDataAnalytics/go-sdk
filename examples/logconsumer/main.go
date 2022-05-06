@@ -22,8 +22,9 @@ func main() {
 	// 创建按小时切分的 log consumer, 日志文件存放在当前目录
 	// 创建按天切分的 log consumer, 不设置单个日志上限
 	config := thinkingdata.LogConfig{
+		RotateMode:     thinkingdata.ROTATE_HOURLY,
 		FileNamePrefix: "test",
-		Directory:      "/usr/log",
+		Directory:      "/Users/Shared/log",
 	}
 
 	customData := A{
@@ -45,6 +46,13 @@ func main() {
 		"super_is_num":    15.6,
 	})
 
+	ta.SetDynamicSuperProperties(func() map[string]interface{} {
+		result := make(map[string]interface{})
+		result["dynamic_super_name"] = "Tom"
+		result["dynamic_super_time"] = time.Now()
+		return result
+	})
+
 	accountId := "AA"
 	distinctId := "ABCDEF123456"
 	properties := map[string]interface{}{
@@ -64,7 +72,7 @@ func main() {
 		"source":          "group_chat",
 		"my_data":         customData,
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1; i++ {
 
 		// track事件
 		err := ta.Track(accountId, distinctId, "view_page", properties)

@@ -1,11 +1,15 @@
 package thinkingdata
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"reflect"
 	"regexp"
+	"strconv"
+	"sync"
 	"time"
 )
 
@@ -107,4 +111,41 @@ func parseTime(input []byte) string {
 		input = re.ReplaceAll(input, []byte(substitution))
 	}
 	return string(input)
+}
+
+// 创建一把全局锁
+var uuidLock = new(sync.Mutex)
+
+// generateUUID 创建一个 v4 版本的 uuid
+func generateUUID() string {
+	// 设置随机种子
+	rand.Seed(time.Now().UnixNano())
+
+	uuidLock.Lock()
+
+	// 模版切片
+	template := []byte("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx")
+	// 最终的结果切片
+	uuidSlice := make([]byte, 36)
+
+	// 去除空白的字符，否则写入文件时候，头部会出现连续的空白字符
+	uuidSlice = bytes.ReplaceAll(uuidSlice, []byte{0}, []byte{32})
+	uuidSlice = bytes.TrimSpace(uuidSlice)
+
+	// 遍历每一个byte，进行判断与替换
+	for _, v := range template {
+		r := rand.Intn(16)
+		if v == 'x' || v == 'y' {
+			if v == 'y' {
+				r = r&0x3 | 0x8
+			}
+			// 随机数转换为16进制字符串，再转换为byte
+			v = []byte(strconv.FormatInt(int64(r), 16))[0]
+		}
+		uuidSlice = append(uuidSlice, v)
+	}
+
+	uuidLock.Unlock()
+
+	return string(uuidSlice)
 }

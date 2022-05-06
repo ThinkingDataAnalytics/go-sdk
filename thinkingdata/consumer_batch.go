@@ -49,7 +49,7 @@ const (
 	DefaultCacheCapacity = 50
 )
 
-// 创建 BatchConsumer
+// NewBatchConsumer 创建 BatchConsumer
 func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
 	config := BatchConfig{
 		ServerUrl: serverUrl,
@@ -59,7 +59,7 @@ func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
 	return initBatchConsumer(config)
 }
 
-// 创建指定批量发送条数的 BatchConsumer
+// NewBatchConsumerWithBatchSize 创建指定批量发送条数的 BatchConsumer
 // serverUrl 接收端地址
 // appId 项目的 APP ID
 // batchSize 批量发送条数
@@ -73,7 +73,7 @@ func NewBatchConsumerWithBatchSize(serverUrl string, appId string, batchSize int
 	return initBatchConsumer(config)
 }
 
-// 创建指定压缩形式的 BatchConsumer
+// NewBatchConsumerWithCompress 创建指定压缩形式的 BatchConsumer
 // serverUrl 接收端地址
 // appId 项目的 APP ID
 // compress 是否压缩数据
@@ -191,6 +191,12 @@ func (c *BatchConsumer) Flush() error {
 		c.buffer = make([]Data, 0, c.batchSize)
 	}
 
+	err := c.uploadEvents()
+
+	return err
+}
+
+func (c *BatchConsumer) uploadEvents() error {
 	buffer := c.cacheBuffer[0]
 
 	jdata, err := json.Marshal(buffer)
@@ -220,8 +226,7 @@ func (c *BatchConsumer) Flush() error {
 			}
 		}
 	}
-
-	return err
+	return nil
 }
 
 func (c *BatchConsumer) FlushAll() error {

@@ -38,7 +38,7 @@ type Consumer interface {
 }
 ```
 
-`thinkingdata` 包提供了 `Consuemr` 的三种实现:
+`thinkingdata` 包提供了 `Consuemr` 的四种实现:
 
 **(1) LogConsumer**: 将数据实时写入本地文件，文件以天/小时切分，并需要与 LogBus 搭配使用进行数据上传 
 ```go
@@ -73,8 +73,28 @@ config := thinkingdata.BatchConfig{
     Interval:  20,   //自动上传间隔，单位：秒
 }
 ```
+**(3) AsyncBatchConsumer**: 批量实时异步地向 TA 服务器传输数据，不需要搭配传输工具
+```go
+// 创建 AsyncBatchConsumer, 指定接收端地址、APP ID
+consumer, err := thinkingdata.NewAsyncBatchConsumer("SERVER_URL", "APP_ID")
+```
+SERVER_URL 为数据接收端的 URL，APP_ID 为您的项目的 APP ID.
 
-**(3) DebugConsumer**: 逐条实时向 TA 服务器传输数据，当数据格式错误时会返回详细的错误信息。建议先使用 DebugConsumer 校验数据格式
+AsyncBatchConsumer 会先将数据存放在缓冲区中，当数据条数超过设定的值(batchSize, 默认为20)，触发上报. 您也可以在创建 AsyncBatchConsumer 的时候指定 batchSize:
+```go
+// 创建 AsyncBatchConsumer, 指定接收端地址、APP ID、缓冲区大小
+consumer, err := thinkingdata.NewAsyncBatchConsumerWithBatchSize("SERVER_URL", "APP_ID", 50)
+// 或者使用config
+config := thinkingdata.BatchConfig{
+    ServerUrl: "SERVER_URL",
+    AppId:     "APP_ID",
+    BatchSize: 50,
+    AutoFlush: true, //开启自动上传功能
+    Interval:  20,   //自动上传间隔，单位：秒
+}
+```
+
+**(4) DebugConsumer**: 逐条实时向 TA 服务器传输数据，当数据格式错误时会返回详细的错误信息。建议先使用 DebugConsumer 校验数据格式
 ```go
 consumer, _ := thinkingdata.NewDebugConsumer("SERVER_URL", "APP_ID")
 ```
@@ -141,7 +161,21 @@ ta.ClearSuperProperties()
 currentSuperProperties := ta.GetSuperProperties()
 ```
 
-#### 3. 设置用户属性
+#### 3. 设置动态公共事件属性
+动态公共事件属性是每个事件都会包含的属性.
+```go
+// 设置动态公共事件属性
+ta.SetDynamicSuperProperties(func() map[string]interface{} {
+    result := make(map[string]interface{})
+    result["dynamic_super_time"] = time.Now()
+    return result
+})
+
+// 清空动态公共事件属性
+ta.SetDynamicSuperProperties(nil)
+```
+
+#### 4. 设置用户属性
 对于一般的用户属性，您可以调用 UserSet 来进行设置. 使用该接口上传的属性将会覆盖原有的属性值，如果之前不存在该用户属性，则会新建该用户属性:
 ```go
 ta.UserSet(account_id, distinct_id, map[string]interface{}{
@@ -162,19 +196,38 @@ ta.UserAdd(account_id, distinct_id, map[string]interface{}{
 	"Amount": 50,
 })
 ```
+
+用户数组类型追加属性 UserAppend ，为下面两个数组类型添加以下属性，只支持key - []string
+```go
+ta.UserAppend(account_id, distinct_id, map[string]interface{}{
+    "array":   []string{"str1", "str2"},
+    "arrkey1": []string{"str3", "str4"},
+})
+```
+
+从 v1.6.0 版本开始，您可以调用 user_uniqAppend 对 List 类型的用户属性进行追加操作。
+
+和 user_append 接口的区别：调用 user_uniqAppend 接口会对追加的用户属性进行去重， user_append 接口不做去重，用户属性可存在重复。
+```go
+ta.UserUniqAppend(account_id, distinct_id, map[string]interface{}{
+    "array":   []string{"str1", "str2"},
+    "arrkey1": []string{"str3", "str4"},
+})
+```
+
 如果您要删除某个用户，可以调用 UserDelete 将这名用户删除. 之后您将无法再查询该用户的用户属性，但该用户产生的事件仍然可以被查询到:
 ```go
 ta.UserDelete(account_id, distinct_id)
 ```
 
-#### 4. 立即进行数据 IO
+#### 5. 立即进行数据 IO
 此操作与具体的 Consumer 实现有关. 在收到数据时, Consumer 可以先将数据存放在缓冲区, 并在一定情况下触发真正的数据 IO 操作, 以提高整体性能. 在某些情况下需要立即提交数据，可以调用 Flush 接口:
 ```go
 // 立即提交数据到相应的接收端
 ta.Flush()
 ```
 
-#### 5. 关闭 SDK
+#### 6. 关闭 SDK
 请在退出程序前调用本接口，以避免缓存内的数据丢失:
 ```go
 // 关闭并退出 SDK
