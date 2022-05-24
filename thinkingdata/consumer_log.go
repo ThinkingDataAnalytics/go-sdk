@@ -20,7 +20,7 @@ const (
 type LogConsumer struct {
 	directory      string      // 日志文件存放目录
 	dateFormat     string      // 与日志切分有关的时间格式
-	fileSize       int64       // 单个日志文件大小，单位 Byte
+	fileSize       int64       // 单个日志文件大小，单位 MByte
 	fileNamePrefix string      // 日志文件前缀名
 	currentFile    *os.File    // 当前日志文件
 	ch             chan string // 数据传输信道
@@ -30,7 +30,7 @@ type LogConsumer struct {
 type LogConfig struct {
 	Directory      string     // 日志文件存放目录
 	RotateMode     RotateMode // 与日志切分有关的时间格式
-	FileSize       int        // 单个日志文件大小，单位 Byte
+	FileSize       int        // 单个日志文件大小，单位 MByte
 	FileNamePrefix string     // 日志文件前缀名
 	AutoFlush      bool       // 自动上传
 	Interval       int        // 自动上传间隔
