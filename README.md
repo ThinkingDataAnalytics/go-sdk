@@ -2,9 +2,9 @@
 
 本指南将会为您介绍如何使用 Golang SDK 接入您的项目。您可以在访问GitHub获取 Golang SDK 的源代码。
 
-**最新版本为：**1.6.1
+**最新版本为：** 1.6.1
 
-**更新时间为：**2022-05-24
+**更新时间为：** 2022-05-24
 
 ## 一、集成并初始化 SDK
 ###1.1 集成 SDK
@@ -50,7 +50,7 @@ type Consumer interface {
 
 thinkingdata 包提供了 Consumer 的三种实现:
 
-**(1) LogConsumer: **将数据实时写入本地文件，文件以天/小时切分，并需要与 LogBus 搭配使用进行数据上传
+**(1) LogConsumer:** 将数据实时写入本地文件，文件以天/小时切分，并需要与 LogBus 搭配使用进行数据上传
 
 ```Go
 // 创建按天切分的 LogConsumer, 不设置单个日志上限
@@ -107,7 +107,7 @@ BatchConsumer 会先将数据存放在缓冲区中，当数据条数超过设定
 consumer, err := thinkingdata.NewBatchConsumerWithBatchSize("SERVER_URL", "APP_ID", 50)
 ```
 
-**(3) DebugConsumer:**逐条实时向 TA 服务器传输数据，当数据格式错误时会返回详细的错误信息。建议先使用 DebugConsumer 校验数据格式，不建议在生产环境中使用
+**(3) DebugConsumer:** 逐条实时向 TA 服务器传输数据，当数据格式错误时会返回详细的错误信息。建议先使用 DebugConsumer 校验数据格式，不建议在生产环境中使用
 
 ```Go
 consumer, _ := thinkingdata.NewDebugConsumer("SERVER_URL", "APP_ID")
@@ -430,51 +430,3 @@ distinct_id := "ABCDEF123456AGDCDD" // 访客 ID
 // 首次事件
 err := ta.TrackFirst(account_id, distinct_id, "EventName", "firstCheckId", properties)
 ```
-
-## ChangeLog
-
-### v1.6.1 2022/05/24
-- 暂时去掉数据批量异步上报 AsyncBatchConsumer
-
-### v1.6.0 2022/05/06
-
-- 支持设置动态公共属性 SetDynamicSuperProperties
-- 支持用户属性追加时去重 UserUniqAppend
-- 支持数据批量异步上报 AsyncBatchConsumer
-- 支持首次事件上报 TrackFirst
-
-### v1.5.0 2021/11/02
-- 增加支持复杂结构类型
-
-### v1.4.0 2021/05/10
-- BatchConsumer 优化：增加缓存，在网络连接中断时缓存数据
-
-### v1.3.0 2020/11/25
-- LogConsumer 优化：支持自动创建目录
-- 优化：增加自动上传功能
-
-### v1.2.0 2020/08/24
-- 支持可更新事件和可重写事件
-
-### v1.1.1 2020/07/08
-- 字段#time 支持上传符合 TA 格式的字符串
-- 去除字段 2k 大小的限制
-
-### v1.1.0 2020/02/12
-- 支持上报数组类型
-- 支持 UserAppend 接口
-- DebugConsumer 优化: 在服务端对数据进行更完备准确地校验
-- BatchConsumer 性能优化：支持配置压缩模式；移除 Base64 编码
-
-### v1.0.2 2019/12/25
-- 支持 UserUnset 接口
-
-### v1.0.1 2019/12/12
-- 修复为空的属性值不写入日志中
-
-### v1.0.0 2019/09/25
-- 实现了数据上报核心功能 
-  - Track: 追踪用户行为事件
-  - 公共事件属性设置
-  - 用户属性设置: UserSet、UserSetOnce、UserAdd、UserDelete
-- 支持: LogConsumer, DebugConsumer, BatchConsumer
