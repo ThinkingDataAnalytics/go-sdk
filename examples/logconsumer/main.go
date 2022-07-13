@@ -71,6 +71,10 @@ func main() {
 		"process_results": []string{"强制手机验证"},
 		"source":          "group_chat",
 		"my_data":         customData,
+		"time_1":          time.Now(),
+		"time_2":          "2022-12-12T22:22:22.333444555Z",
+		"time_3":          "2022-12-12T22:22:22.333+08:00",
+		"time_4":          "2022-12-12T22:22:22.333Z",
 	}
 	for i := 0; i < 1; i++ {
 
