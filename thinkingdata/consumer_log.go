@@ -36,12 +36,12 @@ type LogConfig struct {
 	Interval       int        // 自动上传间隔
 }
 
-// 创建 LogConsumer. 传入日志目录和切分模式
+// NewLogConsumer 创建 LogConsumer. 传入日志目录和切分模式
 func NewLogConsumer(directory string, r RotateMode) (Consumer, error) {
 	return NewLogConsumerWithFileSize(directory, r, 0)
 }
 
-// 创建 LogConsumer. 传入日志目录和切分模式和单个文件大小限制
+// NewLogConsumerWithFileSize 创建 LogConsumer. 传入日志目录和切分模式和单个文件大小限制
 // directory: 日志文件存放目录
 // r: 文件切分模式(按日切分、按小时切分)
 // size: 单个日志文件上限，单位 MB
@@ -62,7 +62,9 @@ func NewLogConsumerWithConfig(config LogConfig) (Consumer, error) {
 	case ROTATE_HOURLY:
 		df = "2006-01-02-15"
 	default:
-		return nil, errors.New("Unknown rotate mode.")
+		errStr := "unknown rotate mode"
+		Logger(errStr)
+		return nil, errors.New(errStr)
 	}
 
 	c := &LogConsumer{
@@ -76,12 +78,22 @@ func NewLogConsumerWithConfig(config LogConfig) (Consumer, error) {
 }
 
 func (c *LogConsumer) Add(d Data) error {
-	bdata, err := json.Marshal(d)
+	jsonBytes, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
 
-	c.ch <- parseTime(bdata)
+	var jsonStr string
+	// 判断property 中是否有复杂数据类型，如果无复杂数据类型，不需要正则替换时间
+	if d.IsComplex {
+		jsonStr = parseTime(jsonBytes)
+	} else {
+		jsonStr = string(jsonBytes)
+	}
+
+	Logger("%v", jsonStr)
+
+	c.ch <- jsonStr
 	return nil
 }
 
@@ -95,21 +107,26 @@ func (c *LogConsumer) Close() error {
 	return nil
 }
 
-func (c *LogConsumer) constructFileName(i int) string {
+func (c *LogConsumer) IsStringent() bool {
+	return false
+}
+
+func (c *LogConsumer) constructFileName(timeStr string, i int) string {
 	fileNamePrefix := ""
 	if len(c.fileNamePrefix) != 0 {
 		fileNamePrefix = c.fileNamePrefix + "."
 	}
+	// 是否需要分页
 	if c.fileSize > 0 {
-		return fmt.Sprintf("%s/%slog.%s_%d", c.directory, fileNamePrefix, time.Now().Format(c.dateFormat), i)
+		return fmt.Sprintf("%s/%slog.%s_%d", c.directory, fileNamePrefix, timeStr, i)
 	} else {
-		return fmt.Sprintf("%s/%slog.%s", c.directory, fileNamePrefix, time.Now().Format(c.dateFormat))
+		return fmt.Sprintf("%s/%slog.%s", c.directory, fileNamePrefix, timeStr)
 	}
 }
 
 // 开启一个 Go 程从信道中读入数据，并写入文件
 func (c *LogConsumer) init() error {
-	//判断目录是否存在
+	// 判断目录是否存在
 	_, err := os.Stat(c.directory)
 	if err != nil && os.IsNotExist(err) {
 		e := os.MkdirAll(c.directory, os.ModePerm)
@@ -117,7 +134,8 @@ func (c *LogConsumer) init() error {
 			return e
 		}
 	}
-	fd, err := os.OpenFile(c.constructFileName(0), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	timeStr := time.Now().Format(c.dateFormat)
+	fd, err := os.OpenFile(c.constructFileName(timeStr, 0), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		fmt.Printf("open failed: %s\n", err)
 		return err
@@ -142,31 +160,37 @@ func (c *LogConsumer) init() error {
 					return
 				}
 
+				timeStr := time.Now().Format(c.dateFormat)
+
 				// 判断是否要切分日志: 根据切分模式和当前日志文件大小来判断
 				var newName string
-				fname := c.constructFileName(i)
-				if c.currentFile.Name() != fname {
-					newName = fname
+				fName := c.constructFileName(timeStr, i)
+				if c.currentFile.Name() != fName {
+					newName = fName
 				} else if c.fileSize > 0 {
 					stat, _ := c.currentFile.Stat()
 					if stat.Size() > c.fileSize {
 						i++
-						newName = c.constructFileName(i)
+						newName = c.constructFileName(timeStr, i)
 					}
 				}
 
 				if newName != "" {
-					c.currentFile.Close()
-					c.currentFile, err = os.OpenFile(fname, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+					err := c.currentFile.Close()
 					if err != nil {
-						fmt.Printf("open failed: %s\n", err)
+						Logger("close file failed: %s\n", err)
+						return
+					}
+					c.currentFile, err = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+					if err != nil {
+						Logger("open failed: %s\n", err)
 						return
 					}
 				}
 
 				_, err = fmt.Fprintln(c.currentFile, rec)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "LoggerWriter(%q): %s\n", c.currentFile.Name(), err)
+					Logger("LoggerWriter(%q): %s\n", c.currentFile.Name(), err)
 					return
 				}
 			}

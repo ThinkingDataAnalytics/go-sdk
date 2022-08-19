@@ -21,6 +21,18 @@ func NewDebugConsumer(serverUrl string, appId string) (Consumer, error) {
 	return NewDebugConsumerWithWriter(serverUrl, appId, true)
 }
 func NewDebugConsumerWithWriter(serverUrl string, appId string, writeData bool) (Consumer, error) {
+	// 开启日志
+	logConfig := LoggerConfig{
+		Type: LoggerTypePrint,
+	}
+	SetLoggerConfig(logConfig)
+
+	if len(serverUrl) <= 0 {
+		msg := fmt.Sprint("ServerUrl 不能为空")
+		Logger(msg)
+		return nil, errors.New(msg)
+	}
+
 	u, err := url.Parse(serverUrl)
 	if err != nil {
 		return nil, err
@@ -33,12 +45,22 @@ func NewDebugConsumerWithWriter(serverUrl string, appId string, writeData bool) 
 }
 
 func (c *DebugConsumer) Add(d Data) error {
-	jdata, err := json.Marshal(d)
+	jsonBytes, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
 
-	return c.send(parseTime(jdata))
+	var jsonStr string
+	// 判断property 中是否有复杂数据类型，如果无复杂数据类型，不需要正则替换时间
+	if d.IsComplex {
+		jsonStr = parseTime(jsonBytes)
+	} else {
+		jsonStr = string(jsonBytes)
+	}
+
+	Logger("%v", jsonStr)
+
+	return c.send(jsonStr)
 }
 
 func (c *DebugConsumer) Flush() error {
@@ -47,6 +69,10 @@ func (c *DebugConsumer) Flush() error {
 
 func (c *DebugConsumer) Close() error {
 	return nil
+}
+
+func (c *DebugConsumer) IsStringent() bool {
+	return true
 }
 
 func (c *DebugConsumer) send(data string) error {

@@ -92,7 +92,9 @@ func NewBatchConsumerWithConfig(config BatchConfig) (Consumer, error) {
 
 func initBatchConsumer(config BatchConfig) (Consumer, error) {
 	if config.ServerUrl == "" {
-		return nil, errors.New(fmt.Sprint("ServerUrl 不能为空"))
+		msg := fmt.Sprint("ServerUrl 不能为空")
+		Logger(msg)
+		return nil, errors.New(msg)
 	}
 	u, err := url.Parse(config.ServerUrl)
 	if err != nil {
@@ -199,24 +201,33 @@ func (c *BatchConsumer) Flush() error {
 func (c *BatchConsumer) uploadEvents() error {
 	buffer := c.cacheBuffer[0]
 
-	jdata, err := json.Marshal(buffer)
+	jsonBytes, err := json.Marshal(buffer)
 	if err == nil {
-		params := parseTime(jdata)
+		params := parseTime(jsonBytes)
 		for i := 0; i < 3; i++ {
 			statusCode, code, err := c.send(params, len(buffer))
 			if statusCode == 200 {
 				c.cacheBuffer = c.cacheBuffer[1:]
 				switch code {
 				case 0:
+					Logger("send success： %v", params)
 					return nil
 				case 1, -1:
-					return fmt.Errorf("ThinkingDataError:invalid data format")
+					msg := "ThinkingDataError:invalid data format"
+					Logger(msg)
+					return fmt.Errorf(msg)
 				case -2:
-					return fmt.Errorf("ThinkingDataError:APP ID doesn't exist")
+					msg := "ThinkingDataError:APP ID doesn't exist"
+					Logger(msg)
+					return fmt.Errorf(msg)
 				case -3:
-					return fmt.Errorf("ThinkingDataError:invalid ip transmission")
+					msg := "ThinkingDataError:invalid ip transmission"
+					Logger(msg)
+					return fmt.Errorf(msg)
 				default:
-					return fmt.Errorf("ThinkingDataError:unknown error")
+					msg := "ThinkingDataError:unknown error"
+					Logger(msg)
+					return fmt.Errorf(msg)
 				}
 			}
 			if err != nil {
@@ -242,6 +253,10 @@ func (c *BatchConsumer) FlushAll() error {
 
 func (c *BatchConsumer) Close() error {
 	return c.FlushAll()
+}
+
+func (c *BatchConsumer) IsStringent() bool {
+	return false
 }
 
 func (c *BatchConsumer) send(data string, size int) (statusCode int, code int, err error) {

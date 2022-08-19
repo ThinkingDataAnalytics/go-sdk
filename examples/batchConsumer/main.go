@@ -21,17 +21,24 @@ type B struct {
 
 func main() {
 	wg := sync.WaitGroup{}
+
+	// 开启日志
+	logConfig := thinkingdata.LoggerConfig{
+		Type: thinkingdata.LoggerTypePrintAndWriteFile,
+		Path: "./test.log",
+	}
+	thinkingdata.SetLoggerConfig(logConfig)
+
 	// 创建 BatchConsumer, 指定接收端地址、APP ID、上报批次
 	config := thinkingdata.BatchConfig{
-		ServerUrl: "http://ip:port",
-		AppId:     "test",
+		//ServerUrl: "您的 serverUrl",
+		//AppId:     "您的 appId",
 		AutoFlush: true,
 		BatchSize: 100,
 		Interval:  20,
 	}
 	consumer, err := thinkingdata.NewBatchConsumerWithConfig(config)
 	if err != nil {
-		fmt.Println(err)
 		return
 	}
 
@@ -55,7 +62,7 @@ func main() {
 	})
 
 	fmt.Printf("%v", time.Now())
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(threadName string) {
 			defer wg.Done()
@@ -66,10 +73,8 @@ func main() {
 				// "#time" 属性是系统预置属性，传入 datetime 对象，表示事件发生的时间，如果不填入该属性，则默认使用系统当前时间
 				"time_now": time.Now(),
 				// "#ip" 属性是系统预置属性，如果服务端中能获取用户 IP 地址，并填入该属性，数数会自动根据 IP 地址解析用户的省份、城市信息
-				"#ip": "123.123.123.123",
-				"id":  "12",
-				//#uuid  去重，服务端比较稳定，可不填，如果填，按照以下标准8-4-4-4-12的String()
-				"#uuid":   "6ba7b810-9dad-2233-80b4-00c04fd430c8",
+				"#ip":     "123.123.123.123",
+				"id":      "12",
 				"catalog": "p",
 				"bool":    true,
 				"aa":      12,
@@ -84,7 +89,7 @@ func main() {
 	}
 	fmt.Printf("%v", time.Now())
 
-	time.Sleep(1000 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	wg.Wait()
 	ta.Flush()

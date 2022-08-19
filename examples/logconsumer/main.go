@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
@@ -19,20 +20,30 @@ type B struct {
 }
 
 func main() {
+	wg := sync.WaitGroup{}
+
+	// 开启日志
+	logConfig := thinkingdata.LoggerConfig{
+		Type: thinkingdata.LoggerTypePrintAndWriteFile,
+		Path: "./test.log",
+	}
+	thinkingdata.SetLoggerConfig(logConfig)
+
 	// 创建按小时切分的 log consumer, 日志文件存放在当前目录
 	// 创建按天切分的 log consumer, 不设置单个日志上限
 	config := thinkingdata.LogConfig{
 		RotateMode:     thinkingdata.ROTATE_HOURLY,
 		FileNamePrefix: "test",
-		Directory:      "/Users/Shared/log",
+		Directory:      "./",
+		FileSize:       2,
 	}
 
 	customData := A{
 		"ThinkingData",
 		time.Now(),
 		[]B{
-			{"Now We Support", time.Now()},
-			{"User Custom Struct Data", time.Now()},
+			{Trigger: "Now We Support", Time: time.Now()},
+			{Trigger: "User Custom Struct Data", Time: time.Now()},
 		},
 	}
 
@@ -76,15 +87,20 @@ func main() {
 		"time_3":          "2022-12-12T22:22:22.333+08:00",
 		"time_4":          "2022-12-12T22:22:22.333Z",
 	}
-	for i := 0; i < 1; i++ {
-
-		// track事件
-		err := ta.Track(accountId, distinctId, "view_page", properties)
-		if err != nil {
-			fmt.Println(err)
-		}
-
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// track事件
+			err := ta.Track(accountId, distinctId, "view_page", properties)
+			if err != nil {
+				fmt.Println(err)
+			}
+		}()
 	}
+
+	wg.Wait()
+
 	ta.Flush()
 
 	defer ta.Close()

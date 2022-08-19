@@ -17,12 +17,13 @@ const (
 	UserUniqAppend = "user_uniq_append" // 追加用户属性，支持去重，再进行入库
 	UserDel        = "user_del"
 
-	SdkVersion = "1.6.4"
+	SdkVersion = "1.6.5"
 	LibName    = "Golang"
 )
 
 // Data 数据信息
 type Data struct {
+	IsComplex    bool                   `json:"-"` // 标记传入的 property 是否是复杂数据类型
 	AccountId    string                 `json:"#account_id,omitempty"`
 	DistinctId   string                 `json:"#distinct_id,omitempty"`
 	Type         string                 `json:"#type"`
@@ -32,6 +33,7 @@ type Data struct {
 	FirstCheckId string                 `json:"#first_check_id,omitempty"`
 	Ip           string                 `json:"#ip,omitempty"`
 	UUID         string                 `json:"#uuid,omitempty"`
+	AppId        string                 `json:"#app_id,omitempty"`
 	Properties   map[string]interface{} `json:"properties"`
 }
 
@@ -40,6 +42,7 @@ type Consumer interface {
 	Add(d Data) error
 	Flush() error
 	Close() error
+	IsStringent() bool // 是否是严格模式
 }
 
 type TDAnalytics struct {
@@ -51,6 +54,7 @@ type TDAnalytics struct {
 
 // New 初始化 TDAnalytics
 func New(c Consumer) TDAnalytics {
+	Logger("初始化成功")
 	return TDAnalytics{
 		consumer:        c,
 		superProperties: make(map[string]interface{}),
@@ -106,7 +110,9 @@ func (ta *TDAnalytics) Track(accountId, distinctId, eventName string, properties
 // TrackFirst 首次事件
 func (ta *TDAnalytics) TrackFirst(accountId, distinctId, eventName, firstCheckId string, properties map[string]interface{}) error {
 	if len(firstCheckId) == 0 {
-		return errors.New("the 'firstCheckId' must be provided")
+		msg := "the 'firstCheckId' must be provided"
+		Logger(msg)
+		return errors.New(msg)
 	}
 	properties["#first_check_id"] = firstCheckId
 	return ta.track(accountId, distinctId, Track, eventName, "", properties)
@@ -122,24 +128,33 @@ func (ta *TDAnalytics) TrackOverwrite(accountId, distinctId, eventName, eventId 
 
 func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
 	if len(eventName) == 0 {
-		return errors.New("the event name must be provided")
+		msg := "the event name must be provided"
+		Logger(msg)
+		return errors.New(msg)
 	}
 
 	// 只有eventType == Track 的时候才不需要eventId
 	if len(eventId) == 0 && dataType != Track {
-		return errors.New("the event id must be provided")
+		msg := "the event id must be provided"
+		Logger(msg)
+		return errors.New(msg)
 	}
 
 	// 获取设置的公共属性
 	p := ta.GetSuperProperties()
 
-	// 获取动态公共属性
-	mergeProperties(p, ta.GetDynamicSuperProperties())
+	// 动态公共属性
+	dynamicSuperProperties := ta.GetDynamicSuperProperties()
 
+	ta.mutex.Lock()
+	// 组合动态公共属性
+	mergeProperties(p, dynamicSuperProperties)
+	// 预制属性优先级高于公共属性
 	p["#lib"] = LibName
 	p["#lib_version"] = SdkVersion
-
+	// 自定义属性
 	mergeProperties(p, properties)
+	ta.mutex.Unlock()
 
 	return ta.add(accountId, distinctId, dataType, eventName, eventId, p)
 }
@@ -152,7 +167,9 @@ func (ta *TDAnalytics) UserSet(accountId string, distinctId string, properties m
 // UserUnset 删除用户属性
 func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string) error {
 	if len(s) == 0 {
-		return errors.New("invalid params for UserUnset: properties is nil")
+		msg := "invalid params for UserUnset: properties is nil"
+		Logger(msg)
+		return errors.New(msg)
 	}
 	prop := make(map[string]interface{})
 	for _, v := range s {
@@ -188,10 +205,14 @@ func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
 
 func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties map[string]interface{}) error {
 	if properties == nil && dataType != UserDel {
-		return errors.New("invalid params for " + dataType + ": properties is nil")
+		msg := "invalid params for " + dataType + ": properties is nil"
+		Logger(msg)
+		return errors.New(msg)
 	}
 	p := make(map[string]interface{})
+	ta.mutex.Lock()
 	mergeProperties(p, properties)
+	ta.mutex.Unlock()
 	return ta.add(accountId, distinctId, dataType, "", "", p)
 }
 
@@ -207,11 +228,16 @@ func (ta *TDAnalytics) Close() error {
 
 func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
 	if len(accountId) == 0 && len(distinctId) == 0 {
-		return errors.New("invalid paramters: account_id and distinct_id cannot be empty at the same time")
+		msg := "invalid parameters: account_id and distinct_id cannot be empty at the same time"
+		Logger(msg)
+		return errors.New(msg)
 	}
 
 	// 获取 properties 中 #ip 值, 如不存在则返回 ""
 	ip := extractStringProperty(properties, "#ip")
+
+	// 获取 properties 中 #app_id 值, 如不存在则返回 ""
+	appId := extractStringProperty(properties, "#app_id")
 
 	// 获取 properties 中 #time 值, 如不存在则返回当前时间
 	eventTime := extractTime(properties)
@@ -237,8 +263,12 @@ func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId s
 		Properties:   properties,
 	}
 
+	if len(appId) > 0 {
+		data.AppId = appId
+	}
+
 	// 检查数据格式, 并将时间类型数据转为符合格式要求的字符串
-	err := formatProperties(&data)
+	err := formatProperties(&data, ta)
 	if err != nil {
 		return err
 	}

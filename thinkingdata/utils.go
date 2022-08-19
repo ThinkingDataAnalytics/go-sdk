@@ -64,34 +64,46 @@ func isNotNumber(v interface{}) bool {
 	return false
 }
 
-func formatProperties(d *Data) error {
+func formatProperties(d *Data, ta *TDAnalytics) error {
 
 	if d.EventName != "" {
 		matched := checkPattern([]byte(d.EventName))
 		if !matched {
-			return errors.New("Invalid event name: " + d.EventName)
+			msg := "invalid event name: " + d.EventName
+			Logger(msg)
+			return errors.New(msg)
 		}
 	}
 
 	if d.Properties != nil {
 		for k, v := range d.Properties {
-			isMatch := checkPattern([]byte(k))
-			if !isMatch {
-				return errors.New("Invalid property key: " + k)
+			if ta.consumer.IsStringent() {
+				isMatch := checkPattern([]byte(k))
+				if !isMatch {
+					msg := "invalid property key: " + k
+					Logger(msg)
+					return errors.New(msg)
+				}
 			}
 
 			if d.Type == UserAdd && isNotNumber(v) {
-				return errors.New("Invalid property value: only numbers is supported by UserAdd")
+				msg := "invalid property value: only numbers is supported by UserAdd"
+				Logger(msg)
+				return errors.New(msg)
 			}
 
 			// check value
 			switch v.(type) {
+			case int:
 			case bool:
+			case float64:
 			case string:
-			case []string:
-			case time.Time: //only support time.Time
+			case time.Time:
 				d.Properties[k] = v.(time.Time).Format(DATE_FORMAT)
+			case []string:
+				d.IsComplex = true
 			default:
+				d.IsComplex = true
 			}
 		}
 	}
