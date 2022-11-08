@@ -2,9 +2,9 @@
 
 本指南将会为您介绍如何使用 Golang SDK 接入您的项目。您可以在访问GitHub获取 Golang SDK 的源代码。
 
-**最新版本为：** 1.6.6
+**最新版本为：** 1.6.7
 
-**更新时间为：** 2022-08-19
+**更新时间为：** 2022-11-08
 
 ## 一、集成并初始化 SDK
 ### 1.1 集成 SDK
@@ -117,7 +117,13 @@ consumer, _ := thinkingdata.NewDebugConsumer("SERVER_URL", "APP_ID")
 
 ```Go
 //默认是true，代表入库
-consumer, _ := thinkingdata.NewDebugConsumerWithWriter("SERVER_URL", "APP_ID",false)
+consumer, _ := thinkingdata.NewDebugConsumerWithWriter("SERVER_URL", "APP_ID", false)
+```
+
+通过设置deviceId参数，可以在TA后台实时调试数据。
+
+```Go
+consumer, _ := thinkingdata.NewDebugConsumerWithDeviceId("SERVER_URL", "APP_ID", false, "DeviceID")
 ```
 
 SERVER_URL为传输数据的 URL，APP_ID为您的项目的 APP ID

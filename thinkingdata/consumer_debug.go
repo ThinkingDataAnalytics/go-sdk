@@ -14,13 +14,18 @@ type DebugConsumer struct {
 	serverUrl string // 接收端地址
 	appId     string // 项目 APP ID
 	writeData bool   // 是否写入TA库
+	deviceId  string // 用来调试的设备id
 }
 
-// 创建 DebugConsumer. DebugConsumer 实现逐条上报数据，并返回数据校验的详细错误信息.
+// NewDebugConsumer 创建 DebugConsumer. DebugConsumer 实现逐条上报数据，并返回数据校验的详细错误信息.
 func NewDebugConsumer(serverUrl string, appId string) (Consumer, error) {
 	return NewDebugConsumerWithWriter(serverUrl, appId, true)
 }
 func NewDebugConsumerWithWriter(serverUrl string, appId string, writeData bool) (Consumer, error) {
+	return NewDebugConsumerWithDeviceId(serverUrl, appId, writeData, "")
+}
+
+func NewDebugConsumerWithDeviceId(serverUrl string, appId string, writeData bool, deviceId string) (Consumer, error) {
 	// 开启日志
 	logConfig := LoggerConfig{
 		Type: LoggerTypePrint,
@@ -40,7 +45,7 @@ func NewDebugConsumerWithWriter(serverUrl string, appId string, writeData bool) 
 
 	u.Path = "/data_debug"
 
-	c := &DebugConsumer{serverUrl: u.String(), appId: appId, writeData: writeData}
+	c := &DebugConsumer{serverUrl: u.String(), appId: appId, writeData: writeData, deviceId: deviceId}
 	return c, nil
 }
 
@@ -80,7 +85,11 @@ func (c *DebugConsumer) send(data string) error {
 	if !c.writeData {
 		dryRun = "1"
 	}
-	resp, err := http.PostForm(c.serverUrl, url.Values{"data": {data}, "appid": {c.appId}, "source": {"server"}, "dryRun": {dryRun}})
+	postData := url.Values{"data": {data}, "appid": {c.appId}, "source": {"server"}, "dryRun": {dryRun}}
+	if len(c.deviceId) > 0 {
+		postData.Add("deviceId", c.deviceId)
+	}
+	resp, err := http.PostForm(c.serverUrl, postData)
 	if err != nil {
 		return err
 	}

@@ -32,8 +32,6 @@ type LogConfig struct {
 	RotateMode     RotateMode // 与日志切分有关的时间格式
 	FileSize       int        // 单个日志文件大小，单位 MByte
 	FileNamePrefix string     // 日志文件前缀名
-	AutoFlush      bool       // 自动上传
-	Interval       int        // 自动上传间隔
 }
 
 // NewLogConsumer 创建 LogConsumer. 传入日志目录和切分模式

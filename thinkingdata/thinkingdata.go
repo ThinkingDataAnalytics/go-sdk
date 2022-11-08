@@ -17,7 +17,7 @@ const (
 	UserUniqAppend = "user_uniq_append" // 追加用户属性，支持去重，再进行入库
 	UserDel        = "user_del"
 
-	SdkVersion = "1.6.6"
+	SdkVersion = "1.6.7"
 	LibName    = "Golang"
 )
 

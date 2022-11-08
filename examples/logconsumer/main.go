@@ -30,11 +30,10 @@ func main() {
 	thinkingdata.SetLoggerConfig(logConfig)
 
 	// 创建按小时切分的 log consumer, 日志文件存放在当前目录
-	// 创建按天切分的 log consumer, 不设置单个日志上限
 	config := thinkingdata.LogConfig{
 		RotateMode:     thinkingdata.ROTATE_HOURLY,
-		FileNamePrefix: "test",
-		Directory:      "./",
+		FileNamePrefix: "test_prefix",
+		Directory:      "./log",
 		FileSize:       2,
 	}
 
@@ -47,7 +46,10 @@ func main() {
 		},
 	}
 
-	consumer, _ := thinkingdata.NewLogConsumerWithConfig(config)
+	consumer, err := thinkingdata.NewLogConsumerWithConfig(config)
+	if err != nil {
+		// consumer 初始化失败
+	}
 	ta := thinkingdata.New(consumer)
 
 	ta.SetSuperProperties(map[string]interface{}{
@@ -71,21 +73,25 @@ func main() {
 		//"#time":time.Now(),
 		"update_time": time.Now(),
 		// "#ip" 属性是系统预置属性，如果服务端中能获取用户 IP 地址，并填入该属性，数数会自动根据 IP 地址解析用户的省份、城市信息
-		"#ip":             "123.123.123.123",
-		"id":              "22",
-		"catalog":         "a",
-		"is_boo":          true,
-		"detect_results":  []string{"不通过"},
-		"detect_type":     "image",
-		"detect_way":      "YIDun",
-		"label":           []string{"涉政"},
-		"process_results": []string{"强制手机验证"},
-		"source":          "group_chat",
-		"my_data":         customData,
-		"time_1":          time.Now(),
-		"time_2":          "2022-12-12T22:22:22.333444555Z",
-		"time_3":          "2022-12-12T22:22:22.333+08:00",
-		"time_4":          "2022-12-12T22:22:22.333Z",
+		"#ip":       "123.123.123.123",
+		"channel":   "ta",       // 字符串
+		"age":       1,          // 数字
+		"isSuccess": true,       // 布尔
+		"birthday":  time.Now(), // 时间
+		"object": map[string]interface{}{
+			"key": "value",
+		}, // 对象
+		"objectArr": []interface{}{
+			map[string]interface{}{
+				"key": "value",
+			},
+		}, // 对象组
+		"arr":     []string{"测试1", "测试2", "测试3"}, // 数组
+		"my_data": customData,                    // 自定义对象
+		"time_1":  time.Now(),
+		"time_2":  "2022-12-12T22:22:22.333444555Z",
+		"time_3":  "2022-12-12T22:22:22.333+08:00",
+		"time_4":  "2022-12-12T22:22:22.333Z",
 	}
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -96,6 +102,7 @@ func main() {
 			if err != nil {
 				fmt.Println(err)
 			}
+
 		}()
 	}
 

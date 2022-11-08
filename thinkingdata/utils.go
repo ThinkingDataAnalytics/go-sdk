@@ -139,12 +139,27 @@ func parseTime(input []byte) string {
 // 创建一把全局锁
 var uuidLock = new(sync.Mutex)
 
+// 用来解决同一时间点的UnixNano重复问题。当UnixNano重复时，需要给随机种子加上此序号。初始化值为1
+var uuidSeedIndex int64 = 1
+
+// 记录当前的随机种子
+var uuidCurrentSeed int64 = 0
+
 // generateUUID 创建一个 v4 版本的 uuid
 func generateUUID() string {
-	// 设置随机种子
-	rand.Seed(time.Now().UnixNano())
-
 	uuidLock.Lock()
+
+	// 获取随机种子
+	seed := time.Now().UnixNano()
+	if seed == uuidCurrentSeed {
+		// 时间重复时，需要加上随机种子的序号
+		seed += uuidSeedIndex
+		uuidSeedIndex++
+	} else {
+		uuidCurrentSeed = seed
+		uuidSeedIndex = 1
+	}
+	rand.Seed(seed)
 
 	// 模版切片
 	template := []byte("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx")

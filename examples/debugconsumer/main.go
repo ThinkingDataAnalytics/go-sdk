@@ -22,7 +22,7 @@ func main() {
 	var err error
 
 	// 创建 Debug Consumer
-	consumer, _ := thinkingdata.NewDebugConsumer("url", "appid")
+	consumer, _ := thinkingdata.NewDebugConsumerWithDeviceId("url", "appid", false, "deviceId")
 	//是否写入TA库，默认写入
 	//consumer, _ := thinkingdata.NewDebugConsumerWithWriter("url", "appid",true)
 	ta := thinkingdata.New(consumer)
