@@ -1,4 +1,3 @@
-// DebugConsumer 逐条上传数据到接收端，并在出错时打印错误信息
 package thinkingdata
 
 import (
@@ -10,30 +9,32 @@ import (
 	"net/url"
 )
 
+// DebugConsumer The data is reported one by one, and when an error occurs, the log will be printed on the console.
 type DebugConsumer struct {
-	serverUrl string // 接收端地址
-	appId     string // 项目 APP ID
-	writeData bool   // 是否写入TA库
-	deviceId  string // 用来调试的设备id
+	serverUrl string // serverUrl
+	appId     string // appId
+	writeData bool   // is archive to TE
+	deviceId  string // be used to debug in TE
 }
 
-// NewDebugConsumer 创建 DebugConsumer. DebugConsumer 实现逐条上报数据，并返回数据校验的详细错误信息.
+// NewDebugConsumer init DebugConsumer
 func NewDebugConsumer(serverUrl string, appId string) (Consumer, error) {
 	return NewDebugConsumerWithWriter(serverUrl, appId, true)
 }
+
 func NewDebugConsumerWithWriter(serverUrl string, appId string, writeData bool) (Consumer, error) {
 	return NewDebugConsumerWithDeviceId(serverUrl, appId, writeData, "")
 }
 
 func NewDebugConsumerWithDeviceId(serverUrl string, appId string, writeData bool, deviceId string) (Consumer, error) {
-	// 开启日志
+	// enable console log
 	logConfig := LoggerConfig{
 		Type: LoggerTypePrint,
 	}
 	SetLoggerConfig(logConfig)
 
 	if len(serverUrl) <= 0 {
-		msg := fmt.Sprint("ServerUrl 不能为空")
+		msg := fmt.Sprint("ServerUrl not be empty")
 		Logger(msg)
 		return nil, errors.New(msg)
 	}
@@ -56,7 +57,7 @@ func (c *DebugConsumer) Add(d Data) error {
 	}
 
 	var jsonStr string
-	// 判断property 中是否有复杂数据类型，如果无复杂数据类型，不需要正则替换时间
+	// if properties has includes complex data, SDK need parse time with regular expression
 	if d.IsComplex {
 		jsonStr = parseTime(jsonBytes)
 	} else {

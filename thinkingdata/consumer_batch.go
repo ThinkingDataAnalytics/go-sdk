@@ -1,4 +1,3 @@
-// BatchConsumer 实现了批量同步的向接收端传送数据的功能
 package thinkingdata
 
 import (
@@ -16,40 +15,41 @@ import (
 	"time"
 )
 
+// BatchConsumer upload data to TE by http
 type BatchConsumer struct {
-	serverUrl   string        // 接收端地址
-	appId       string        // 项目 APP ID
-	timeout     time.Duration // 网络请求超时时间, 单位毫秒
-	compress    bool          // 是否数据压缩
+	serverUrl   string        // serverUrl
+	appId       string        // appId
+	timeout     time.Duration // http timeout (mill second)
+	compress    bool          // is need compress
 	bufferMutex *sync.RWMutex
-	cacheMutex  *sync.RWMutex // 缓存锁
+	cacheMutex  *sync.RWMutex // cache mutex
 
 	buffer        []Data
-	batchSize     int
-	cacheBuffer   [][]Data // 缓存
-	cacheCapacity int      // 缓存最大容量
+	batchSize     int      // flush event count each time
+	cacheBuffer   [][]Data // buffer
+	cacheCapacity int      // buffer max count
 }
 
 type BatchConfig struct {
-	ServerUrl     string // 接收端地址
-	AppId         string // 项目 APP ID
-	BatchSize     int    // 批量上传数目
-	Timeout       int    // 网络请求超时时间, 单位毫秒
-	Compress      bool   // 是否数据压缩
-	AutoFlush     bool   // 自动上传
-	Interval      int    // 自动上传间隔，单位秒
-	CacheCapacity int    // 缓存最大容量
+	ServerUrl     string // serverUrl
+	AppId         string // appId
+	BatchSize     int    // flush event count each time
+	Timeout       int    // http timeout (mill second)
+	Compress      bool   // enable compress data
+	AutoFlush     bool   // enable auto flush
+	Interval      int    // auto flush spacing (second)
+	CacheCapacity int    // cache event count
 }
 
 const (
-	DefaultTimeOut       = 30000 // 默认超时时长 30 秒
-	DefaultBatchSize     = 20    // 默认批量发送条数
-	MaxBatchSize         = 200   // 最大批量发送条数
-	DefaultInterval      = 30    // 默认自动上传间隔 30 秒
+	DefaultTimeOut       = 30000
+	DefaultBatchSize     = 20
+	MaxBatchSize         = 200
+	DefaultInterval      = 30
 	DefaultCacheCapacity = 50
 )
 
-// NewBatchConsumer 创建 BatchConsumer
+// NewBatchConsumer create BatchConsumer
 func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
 	config := BatchConfig{
 		ServerUrl: serverUrl,
@@ -59,10 +59,10 @@ func NewBatchConsumer(serverUrl string, appId string) (Consumer, error) {
 	return initBatchConsumer(config)
 }
 
-// NewBatchConsumerWithBatchSize 创建指定批量发送条数的 BatchConsumer
-// serverUrl 接收端地址
-// appId 项目的 APP ID
-// batchSize 批量发送条数
+// NewBatchConsumerWithBatchSize create BatchConsumer
+// serverUrl
+// appId
+// batchSize: flush event count each time
 func NewBatchConsumerWithBatchSize(serverUrl string, appId string, batchSize int) (Consumer, error) {
 	config := BatchConfig{
 		ServerUrl: serverUrl,
@@ -73,10 +73,10 @@ func NewBatchConsumerWithBatchSize(serverUrl string, appId string, batchSize int
 	return initBatchConsumer(config)
 }
 
-// NewBatchConsumerWithCompress 创建指定压缩形式的 BatchConsumer
-// serverUrl 接收端地址
-// appId 项目的 APP ID
-// compress 是否压缩数据
+// NewBatchConsumerWithCompress create BatchConsumer
+// serverUrl
+// appId
+// compress: enable data compress
 func NewBatchConsumerWithCompress(serverUrl string, appId string, compress bool) (Consumer, error) {
 	config := BatchConfig{
 		ServerUrl: serverUrl,
@@ -92,7 +92,7 @@ func NewBatchConsumerWithConfig(config BatchConfig) (Consumer, error) {
 
 func initBatchConsumer(config BatchConfig) (Consumer, error) {
 	if config.ServerUrl == "" {
-		msg := fmt.Sprint("ServerUrl 不能为空")
+		msg := fmt.Sprint("ServerUrl not be empty")
 		Logger(msg)
 		return nil, errors.New(msg)
 	}
@@ -308,7 +308,7 @@ func (c *BatchConsumer) send(data string, size int) (statusCode int, code int, e
 	}
 }
 
-// Gzip 压缩
+// Gzip
 func encodeData(data string) (string, error) {
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)

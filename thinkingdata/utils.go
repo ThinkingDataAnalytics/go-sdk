@@ -1,15 +1,12 @@
 package thinkingdata
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"math/rand"
+	"github.com/google/uuid"
 	"os"
 	"reflect"
 	"regexp"
-	"strconv"
-	"sync"
 	"time"
 )
 
@@ -18,6 +15,7 @@ const (
 	KEY_PATTERN = "^[a-zA-Z#][A-Za-z0-9_]{0,49}$"
 )
 
+// A string of 50 letters and digits that starts with '#' or a letter
 var keyPattern, _ = regexp.Compile(KEY_PATTERN)
 
 func mergeProperties(target, source map[string]interface{}) {
@@ -136,54 +134,10 @@ func parseTime(input []byte) string {
 	return string(input)
 }
 
-// 创建一把全局锁
-var uuidLock = new(sync.Mutex)
-
-// 用来解决同一时间点的UnixNano重复问题。当UnixNano重复时，需要给随机种子加上此序号。初始化值为1
-var uuidSeedIndex int64 = 1
-
-// 记录当前的随机种子
-var uuidCurrentSeed int64 = 0
-
-// generateUUID 创建一个 v4 版本的 uuid
 func generateUUID() string {
-	uuidLock.Lock()
-
-	// 获取随机种子
-	seed := time.Now().UnixNano()
-	if seed == uuidCurrentSeed {
-		// 时间重复时，需要加上随机种子的序号
-		seed += uuidSeedIndex
-		uuidSeedIndex++
-	} else {
-		uuidCurrentSeed = seed
-		uuidSeedIndex = 1
+	newUUID, err := uuid.NewUUID()
+	if err != nil {
+		return ""
 	}
-	rand.Seed(seed)
-
-	// 模版切片
-	template := []byte("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx")
-	// 最终的结果切片
-	uuidSlice := make([]byte, 36)
-
-	// 去除空白的字符，否则写入文件时候，头部会出现连续的空白字符
-	uuidSlice = bytes.ReplaceAll(uuidSlice, []byte{0}, []byte{32})
-	uuidSlice = bytes.TrimSpace(uuidSlice)
-
-	// 遍历每一个byte，进行判断与替换
-	for _, v := range template {
-		r := rand.Intn(16)
-		if v == 'x' || v == 'y' {
-			if v == 'y' {
-				r = r&0x3 | 0x8
-			}
-			// 随机数转换为16进制字符串，再转换为byte
-			v = []byte(strconv.FormatInt(int64(r), 16))[0]
-		}
-		uuidSlice = append(uuidSlice, v)
-	}
-
-	uuidLock.Unlock()
-
-	return string(uuidSlice)
+	return newUUID.String()
 }

@@ -7,23 +7,22 @@ import (
 
 const (
 	Track          = "track"
-	TrackUpdate    = "track_update"    // 可更新事件
-	TrackOverwrite = "track_overwrite" // 可重写事件
+	TrackUpdate    = "track_update"
+	TrackOverwrite = "track_overwrite"
 	UserSet        = "user_set"
 	UserUnset      = "user_unset"
 	UserSetOnce    = "user_setOnce"
 	UserAdd        = "user_add"
 	UserAppend     = "user_append"
-	UserUniqAppend = "user_uniq_append" // 追加用户属性，支持去重，再进行入库
+	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "1.6.7"
+	SdkVersion = "1.6.8"
 	LibName    = "Golang"
 )
 
-// Data 数据信息
 type Data struct {
-	IsComplex    bool                   `json:"-"` // 标记传入的 property 是否是复杂数据类型
+	IsComplex    bool                   `json:"-"` // properties is nested or not
 	AccountId    string                 `json:"#account_id,omitempty"`
 	DistinctId   string                 `json:"#distinct_id,omitempty"`
 	Type         string                 `json:"#type"`
@@ -37,12 +36,12 @@ type Data struct {
 	Properties   map[string]interface{} `json:"properties"`
 }
 
-// Consumer 为数据实现 IO 操作（写入磁盘或者发送到接收端）
+// Consumer define operation interface
 type Consumer interface {
 	Add(d Data) error
 	Flush() error
 	Close() error
-	IsStringent() bool // 是否是严格模式
+	IsStringent() bool // check data or not.
 }
 
 type TDAnalytics struct {
@@ -52,16 +51,16 @@ type TDAnalytics struct {
 	dynamicSuperProperties func() map[string]interface{}
 }
 
-// New 初始化 TDAnalytics
+// New init SDK
 func New(c Consumer) TDAnalytics {
-	Logger("初始化成功")
+	Logger("init success")
 	return TDAnalytics{
 		consumer:        c,
 		superProperties: make(map[string]interface{}),
 		mutex:           new(sync.RWMutex)}
 }
 
-// GetSuperProperties 返回公共事件属性
+// GetSuperProperties get common properties
 func (ta *TDAnalytics) GetSuperProperties() map[string]interface{} {
 	result := make(map[string]interface{})
 	ta.mutex.RLock()
@@ -70,28 +69,29 @@ func (ta *TDAnalytics) GetSuperProperties() map[string]interface{} {
 	return result
 }
 
-// SetSuperProperties 设置公共事件属性
+// SetSuperProperties set common properties
 func (ta *TDAnalytics) SetSuperProperties(superProperties map[string]interface{}) {
 	ta.mutex.Lock()
 	mergeProperties(ta.superProperties, superProperties)
 	ta.mutex.Unlock()
 }
 
-// ClearSuperProperties 清除公共事件属性
+// ClearSuperProperties clear common properties
 func (ta *TDAnalytics) ClearSuperProperties() {
 	ta.mutex.Lock()
 	ta.superProperties = make(map[string]interface{})
 	ta.mutex.Unlock()
 }
 
-// SetDynamicSuperProperties 设置动态公共事件属性
+// SetDynamicSuperProperties set common properties dynamically.
+// not recommend to add the operation which with a lot of computation
 func (ta *TDAnalytics) SetDynamicSuperProperties(action func() map[string]interface{}) {
 	ta.mutex.Lock()
 	ta.dynamicSuperProperties = action
 	ta.mutex.Unlock()
 }
 
-// GetDynamicSuperProperties 返回动态公共事件属性
+// GetDynamicSuperProperties dynamic common properties
 func (ta *TDAnalytics) GetDynamicSuperProperties() map[string]interface{} {
 	result := make(map[string]interface{})
 	ta.mutex.RLock()
@@ -102,12 +102,12 @@ func (ta *TDAnalytics) GetDynamicSuperProperties() map[string]interface{} {
 	return result
 }
 
-// Track 追踪一个事件
+// Track report ordinary event
 func (ta *TDAnalytics) Track(accountId, distinctId, eventName string, properties map[string]interface{}) error {
 	return ta.track(accountId, distinctId, Track, eventName, "", properties)
 }
 
-// TrackFirst 首次事件
+// TrackFirst report first event. (must add "#first_check_id" in properties, because it is flag of the first event)
 func (ta *TDAnalytics) TrackFirst(accountId, distinctId, eventName, firstCheckId string, properties map[string]interface{}) error {
 	if len(firstCheckId) == 0 {
 		msg := "the 'firstCheckId' must be provided"
@@ -118,10 +118,12 @@ func (ta *TDAnalytics) TrackFirst(accountId, distinctId, eventName, firstCheckId
 	return ta.track(accountId, distinctId, Track, eventName, "", properties)
 }
 
+// TrackUpdate report updatable event
 func (ta *TDAnalytics) TrackUpdate(accountId, distinctId, eventName, eventId string, properties map[string]interface{}) error {
 	return ta.track(accountId, distinctId, TrackUpdate, eventName, eventId, properties)
 }
 
+// TrackOverwrite report overridable event
 func (ta *TDAnalytics) TrackOverwrite(accountId, distinctId, eventName, eventId string, properties map[string]interface{}) error {
 	return ta.track(accountId, distinctId, TrackOverwrite, eventName, eventId, properties)
 }
@@ -133,38 +135,35 @@ func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId
 		return errors.New(msg)
 	}
 
-	// 只有eventType == Track 的时候才不需要eventId
+	// eventId not be null unless eventType is equal Track.
 	if len(eventId) == 0 && dataType != Track {
 		msg := "the event id must be provided"
 		Logger(msg)
 		return errors.New(msg)
 	}
 
-	// 获取设置的公共属性
 	p := ta.GetSuperProperties()
 
-	// 动态公共属性
 	dynamicSuperProperties := ta.GetDynamicSuperProperties()
 
 	ta.mutex.Lock()
-	// 组合动态公共属性
 	mergeProperties(p, dynamicSuperProperties)
-	// 预制属性优先级高于公共属性
+	// preset properties has the highest priority
 	p["#lib"] = LibName
 	p["#lib_version"] = SdkVersion
-	// 自定义属性
+	// custom properties
 	mergeProperties(p, properties)
 	ta.mutex.Unlock()
 
 	return ta.add(accountId, distinctId, dataType, eventName, eventId, p)
 }
 
-// UserSet 设置用户属性. 如果同名属性已存在，则用传入的属性覆盖同名属性.
+// UserSet set user properties. would overwrite existing names.
 func (ta *TDAnalytics) UserSet(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserSet, properties)
 }
 
-// UserUnset 删除用户属性
+// UserUnset clear the user properties of users.
 func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string) error {
 	if len(s) == 0 {
 		msg := "invalid params for UserUnset: properties is nil"
@@ -178,27 +177,27 @@ func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string
 	return ta.user(accountId, distinctId, UserUnset, prop)
 }
 
-// UserSetOnce 设置用户属性. 不会覆盖同名属性.
+// UserSetOnce set user properties, If such property had been set before, this message would be neglected.
 func (ta *TDAnalytics) UserSetOnce(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserSetOnce, properties)
 }
 
-// UserAdd 对数值类型的属性做累加操作
+// UserAdd to accumulate operations against the property.
 func (ta *TDAnalytics) UserAdd(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserAdd, properties)
 }
 
-// UserAppend 对数组类型的属性做追加加操作
+// UserAppend to add user properties of array type.
 func (ta *TDAnalytics) UserAppend(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserAppend, properties)
 }
 
-// UserUniqAppend 对数组类型的属性做追加加操作，对于重复元素进行去重处理
+// UserUniqAppend append user properties to array type by unique.
 func (ta *TDAnalytics) UserUniqAppend(accountId string, distinctId string, properties map[string]interface{}) error {
 	return ta.user(accountId, distinctId, UserUniqAppend, properties)
 }
 
-// UserDelete 删除用户数据, 之后无法查看用户属性, 但是之前已经入库的事件数据不会被删除. 此操作不可逆
+// UserDelete delete a user, This operation cannot be undone.
 func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
 	return ta.user(accountId, distinctId, UserDel, nil)
 }
@@ -216,12 +215,12 @@ func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties m
 	return ta.add(accountId, distinctId, dataType, "", "", p)
 }
 
-// Flush 立即开始数据 IO 操作
+// Flush report data immediately.
 func (ta *TDAnalytics) Flush() error {
 	return ta.consumer.Flush()
 }
 
-// Close 关闭 TDAnalytics
+// Close and exit sdk
 func (ta *TDAnalytics) Close() error {
 	return ta.consumer.Close()
 }
@@ -233,18 +232,18 @@ func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId s
 		return errors.New(msg)
 	}
 
-	// 获取 properties 中 #ip 值, 如不存在则返回 ""
+	// get "#ip" value in properties, empty string will be return when not found.
 	ip := extractStringProperty(properties, "#ip")
 
-	// 获取 properties 中 #app_id 值, 如不存在则返回 ""
+	// get "#app_id" value in properties, empty string will be return when not found.
 	appId := extractStringProperty(properties, "#app_id")
 
-	// 获取 properties 中 #time 值, 如不存在则返回当前时间
+	// get "#time" value in properties, empty string will be return when not found.
 	eventTime := extractTime(properties)
 
 	firstCheckId := extractStringProperty(properties, "#first_check_id")
 
-	//如果上传#uuid， 只支持UUID标准格式xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx的string类型
+	// get "#uuid" value in properties, empty string will be return when not found.
 	uuid := extractStringProperty(properties, "#uuid")
 	if len(uuid) == 0 {
 		uuid = generateUUID()
@@ -267,7 +266,6 @@ func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId s
 		data.AppId = appId
 	}
 
-	// 检查数据格式, 并将时间类型数据转为符合格式要求的字符串
 	err := formatProperties(&data, ta)
 	if err != nil {
 		return err
