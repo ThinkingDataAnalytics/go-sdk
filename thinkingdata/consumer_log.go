@@ -126,7 +126,7 @@ func (c *LogConsumer) constructFileName(timeStr string, i int) string {
 func (c *LogConsumer) init() error {
 	fd, err := c.initLogFile()
 	if err != nil {
-		fmt.Printf("open failed: %s\n", err)
+		Logger("init log file failed: %s\n", err)
 		return err
 	}
 	c.currentFile = fd
@@ -171,6 +171,16 @@ func (c *LogConsumer) writeToFile(str string) {
 	// paging by Rotate Mode and current file size
 	var newName string
 	fName := c.constructFileName(timeStr, logFileIndex)
+
+	if c.currentFile == nil {
+		var openFileErr error
+		c.currentFile, openFileErr = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+		if openFileErr != nil {
+			Logger("open log file failed: %s\n", openFileErr)
+			return
+		}
+	}
+
 	if c.currentFile.Name() != fName {
 		newName = fName
 	} else if c.fileSize > 0 {
@@ -188,7 +198,7 @@ func (c *LogConsumer) writeToFile(str string) {
 		}
 		c.currentFile, err = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 		if err != nil {
-			Logger("open failed: %s\n", err)
+			Logger("rotate log file failed: %s\n", err)
 			return
 		}
 	}

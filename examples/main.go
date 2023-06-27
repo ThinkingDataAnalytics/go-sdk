@@ -20,12 +20,10 @@ type B struct {
 }
 
 func main() {
-	// enable console log
-	logConfig := thinkingdata.LoggerConfig{
-		Type: thinkingdata.LoggerTypeOff,
-		Path: "./test.log",
-	}
-	thinkingdata.SetLoggerConfig(logConfig)
+	//enable console log
+	thinkingdata.SetLoggerConfig(thinkingdata.LoggerConfig{
+		Type: thinkingdata.LoggerTypePrint,
+	})
 
 	// e.g. init consumer, you can choose different consumer
 
@@ -97,10 +95,10 @@ func main() {
 	}
 
 	// sync example
-	syncExample(&te, accountId, distinctId, properties)
+	//syncExample(&te, accountId, distinctId, properties)
 
 	//// async example
-	//asyncExample(&te, accountId, distinctId, properties)
+	asyncExample(&te, accountId, distinctId, properties)
 
 	//// async with http server.
 	//mock_server.Start(func() {
@@ -127,13 +125,13 @@ func syncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, pro
 
 func asyncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, properties map[string]interface{}) {
 	wg := sync.WaitGroup{}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 500; i++ {
 		wg.Add(1)
 		distinctId = randomString()
 
 		go func(index int, distinctId string) {
 			defer wg.Done()
-			for j := 0; j < 2000; j++ {
+			for j := 0; j < 100; j++ {
 				err := te.Track(accountId, distinctId, fmt.Sprintf("ab___%v___%v", index, j), properties)
 				if err != nil {
 					fmt.Println(err)
@@ -158,11 +156,10 @@ func randomString() string {
 func generateLogConsumer() (thinkingdata.Consumer, error) {
 	// logConsumer config
 	config := thinkingdata.LogConfig{
-		RotateMode:     thinkingdata.ROTATE_HOURLY,
 		FileNamePrefix: "test_prefix",
-		Directory:      "./log",
+		Directory:      "H:/log",
+		RotateMode:     thinkingdata.ROTATE_HOURLY,
 		FileSize:       200,
-		ChannelSize:    20000,
 	}
 	return thinkingdata.NewLogConsumerWithConfig(config)
 }

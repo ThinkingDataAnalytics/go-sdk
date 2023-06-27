@@ -17,12 +17,12 @@ const (
 	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "1.6.8"
+	SdkVersion = "1.6.9"
 	LibName    = "Golang"
 )
 
 type Data struct {
-	IsComplex    bool                   `json:"-"` // properties is nested or not
+	IsComplex    bool                   `json:"-"` // properties are nested or not
 	AccountId    string                 `json:"#account_id,omitempty"`
 	DistinctId   string                 `json:"#distinct_id,omitempty"`
 	Type         string                 `json:"#type"`
