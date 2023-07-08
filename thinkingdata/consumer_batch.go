@@ -28,6 +28,7 @@ type BatchConsumer struct {
 	batchSize     int      // flush event count each time
 	cacheBuffer   [][]Data // buffer
 	cacheCapacity int      // buffer max count
+	buf           strings.Builder
 }
 
 type BatchConfig struct {
@@ -215,19 +216,19 @@ func (c *BatchConsumer) uploadEvents() error {
 				case 1, -1:
 					msg := "ThinkingDataError:invalid data format"
 					Logger(msg)
-					return fmt.Errorf(msg)
+					return errors.New(msg)
 				case -2:
 					msg := "ThinkingDataError:APP ID doesn't exist"
 					Logger(msg)
-					return fmt.Errorf(msg)
+					return errors.New(msg)
 				case -3:
 					msg := "ThinkingDataError:invalid ip transmission"
 					Logger(msg)
-					return fmt.Errorf(msg)
+					return errors.New(msg)
 				default:
 					msg := "ThinkingDataError:unknown error"
 					Logger(msg)
-					return fmt.Errorf(msg)
+					return errors.New(msg)
 				}
 			}
 			if err != nil {
@@ -263,7 +264,7 @@ func (c *BatchConsumer) send(data string, size int) (statusCode int, code int, e
 	var encodedData string
 	var compressType = "gzip"
 	if c.compress {
-		encodedData, err = encodeData(data)
+		encodedData, err = c.encodeData(data)
 	} else {
 		encodedData = data
 		compressType = "none"
@@ -309,9 +310,9 @@ func (c *BatchConsumer) send(data string, size int) (statusCode int, code int, e
 }
 
 // Gzip
-func encodeData(data string) (string, error) {
-	var buf bytes.Buffer
-	gw := gzip.NewWriter(&buf)
+func (c *BatchConsumer) encodeData(data string) (string, error) {
+	c.buf.Reset()
+	gw := gzip.NewWriter(&c.buf)
 
 	_, err := gw.Write([]byte(data))
 	if err != nil {
@@ -320,7 +321,7 @@ func encodeData(data string) (string, error) {
 	}
 	gw.Close()
 
-	return string(buf.Bytes()), nil
+	return c.buf.String(), nil
 }
 
 func (c *BatchConsumer) getBufferLength() int {
