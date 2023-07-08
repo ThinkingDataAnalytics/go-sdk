@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +27,7 @@ type LogConsumer struct {
 	currentFile    *os.File // current file handler
 	wg             sync.WaitGroup
 	ch             chan []byte
+	chStatus       int32 // ch 0:closed, 1:not closed
 }
 
 type LogConfig struct {
@@ -78,11 +80,16 @@ func NewLogConsumerWithConfig(config LogConfig) (Consumer, error) {
 		fileNamePrefix: config.FileNamePrefix,
 		wg:             sync.WaitGroup{},
 		ch:             make(chan []byte, chanSize),
+		chStatus:       1,
 	}
 	return c, c.init()
 }
 
 func (c *LogConsumer) Add(d Data) error {
+	if atomic.LoadInt32(&c.chStatus) == 0 {
+		return errors.New("logConsumer is closed")
+	}
+
 	jsonBytes, err := json.Marshal(d)
 	if err != nil {
 		return err
@@ -96,6 +103,9 @@ func (c *LogConsumer) Flush() error {
 }
 
 func (c *LogConsumer) Close() error {
+	if !atomic.CompareAndSwapInt32(&c.chStatus, 1, 0) {
+		return nil // if ch is closed, return
+	}
 	close(c.ch)
 	c.wg.Wait()
 	if c.currentFile != nil {
