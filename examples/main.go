@@ -38,7 +38,7 @@ func main() {
 	defer func() {
 		err = te.Close()
 		if err != nil {
-			fmt.Println("TE close error")
+			fmt.Printf("TE close error: %v\n", err.Error())
 		} else {
 			fmt.Println("TE close success")
 		}
@@ -157,7 +157,7 @@ func generateLogConsumer() (thinkingdata.Consumer, error) {
 	// logConsumer config
 	config := thinkingdata.LogConfig{
 		FileNamePrefix: "test_prefix",
-		Directory:      "H:/log",
+		Directory:      "D:/log",
 		RotateMode:     thinkingdata.ROTATE_HOURLY,
 		FileSize:       200,
 	}

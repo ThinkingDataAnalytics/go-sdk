@@ -17,7 +17,7 @@ const (
 	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "1.6.9"
+	SdkVersion = "1.7.0"
 	LibName    = "Golang"
 )
 
@@ -57,7 +57,8 @@ func New(c Consumer) TDAnalytics {
 	return TDAnalytics{
 		consumer:        c,
 		superProperties: make(map[string]interface{}),
-		mutex:           new(sync.RWMutex)}
+		mutex:           new(sync.RWMutex),
+	}
 }
 
 // GetSuperProperties get common properties

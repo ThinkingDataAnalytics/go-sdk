@@ -26,6 +26,8 @@ type LogConsumer struct {
 	currentFile    *os.File // current file handler
 	wg             sync.WaitGroup
 	ch             chan []byte
+	mutex          *sync.RWMutex
+	sdkClose       bool
 }
 
 type LogConfig struct {
@@ -78,32 +80,57 @@ func NewLogConsumerWithConfig(config LogConfig) (Consumer, error) {
 		fileNamePrefix: config.FileNamePrefix,
 		wg:             sync.WaitGroup{},
 		ch:             make(chan []byte, chanSize),
+		mutex:          new(sync.RWMutex),
+		sdkClose:       false,
 	}
 	return c, c.init()
 }
 
 func (c *LogConsumer) Add(d Data) error {
-	jsonBytes, err := json.Marshal(d)
-	if err != nil {
-		return err
+	var err error = nil
+	c.mutex.Lock()
+	if c.sdkClose {
+		err = errors.New("[ThinkingData][error]: add event failed, SDK has been closed")
+	} else {
+		jsonBytes, jsonErr := json.Marshal(d)
+		if jsonErr != nil {
+			err = jsonErr
+		} else {
+			c.ch <- jsonBytes
+		}
 	}
-	c.ch <- jsonBytes
-	return nil
+	c.mutex.Unlock()
+
+	return err
 }
 
 func (c *LogConsumer) Flush() error {
-	return c.currentFile.Sync()
+	var err error = nil
+	c.mutex.Lock()
+	if c.currentFile != nil {
+		err = c.currentFile.Sync()
+	}
+	c.mutex.Unlock()
+	return err
 }
 
 func (c *LogConsumer) Close() error {
-	close(c.ch)
-	c.wg.Wait()
-	if c.currentFile != nil {
-		c.currentFile.Sync()
-		c.currentFile.Close()
-		c.currentFile = nil
+	var err error = nil
+	c.mutex.Lock()
+	if c.sdkClose {
+		err = errors.New("[ThinkingData][error]: SDK has been closed")
+	} else {
+		close(c.ch)
+		c.wg.Wait()
+		if c.currentFile != nil {
+			_ = c.currentFile.Sync()
+			err = c.currentFile.Close()
+			c.currentFile = nil
+		}
 	}
-	return nil
+	c.sdkClose = true
+	c.mutex.Unlock()
+	return err
 }
 
 func (c *LogConsumer) IsStringent() bool {

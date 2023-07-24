@@ -1,3 +1,10 @@
+### v1.7.0
+**Date:** 2023/07/24
+
+**Notes:**
+
+* Throws an error when there is a problem with the method call
+
 ### v1.6.9
 **Date:** 2023/06/27
 
