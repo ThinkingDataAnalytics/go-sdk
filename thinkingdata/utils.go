@@ -3,11 +3,12 @@ package thinkingdata
 import (
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"os"
 	"reflect"
 	"regexp"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -17,6 +18,7 @@ const (
 
 // A string of 50 letters and digits that starts with '#' or a letter
 var keyPattern, _ = regexp.Compile(KEY_PATTERN)
+var reRFC3339 = regexp.MustCompile(`"((\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d{3}))\d*)(Z|[\+-]\d{2}:\d{2})"`)
 
 func mergeProperties(target, source map[string]interface{}) {
 	for k, v := range source {
@@ -125,11 +127,10 @@ func checkPattern(name []byte) bool {
 }
 
 func parseTime(input []byte) string {
-	var re = regexp.MustCompile(`"((\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.(\d{3}))\d*)(Z|[\+-]\d{2}:\d{2})"`)
 	var substitution = "\"$2 $3.$4\""
 
-	for re.Match(input) {
-		input = re.ReplaceAll(input, []byte(substitution))
+	for reRFC3339.Match(input) {
+		input = reRFC3339.ReplaceAll(input, []byte(substitution))
 	}
 	return string(input)
 }
