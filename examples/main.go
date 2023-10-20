@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/ThinkingDataAnalytics/go-sdk/thinkingdata"
+	"github.com/ThinkingDataAnalytics/go-sdk/src/thinkingdata"
 	"github.com/google/uuid"
 	"sync"
 	"time"
@@ -20,16 +20,15 @@ type B struct {
 }
 
 func main() {
-	//enable console log
-	thinkingdata.SetLoggerConfig(thinkingdata.LoggerConfig{
-		Type: thinkingdata.LoggerTypePrint,
-	})
+	// enable console log
+	thinkingdata.SetLogLevel(thinkingdata.TDLogLevelDebug)
 
 	// e.g. init consumer, you can choose different consumer
 
-	//consumer, err := generateDebugConsumer() // DebugConsumer
-	//consumer, err := generateBatchConsumer() // BatchConsumer
-	consumer, err := generateLogConsumer() // LogConsumer
+	consumer, err := generateDebugConsumer() // TDDebugConsumer
+	//consumer, err := generateBatchConsumer() // TDBatchConsumer
+	//consumer, err := generateLogConsumer() // TDLogConsumer
+
 	if err != nil {
 		// consumer init error
 	}
@@ -40,7 +39,7 @@ func main() {
 		if err != nil {
 			fmt.Printf("TE close error: %v\n", err.Error())
 		} else {
-			fmt.Println("TE close success")
+			fmt.Println("[Example] TE close success")
 		}
 	}()
 
@@ -95,11 +94,11 @@ func main() {
 	}
 
 	// sync example
-	//syncExample(&te, accountId, distinctId, properties)
+	syncExample(&te, accountId, distinctId, properties)
 
 	//// async example
-	asyncExample(&te, accountId, distinctId, properties)
-
+	//asyncExample(&te, accountId, distinctId, properties)
+	//
 	//// async with http server.
 	//mock_server.Start(func() {
 	//	asyncExample(&te, accountId, distinctId, properties)
@@ -108,7 +107,7 @@ func main() {
 
 func syncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, properties map[string]interface{}) {
 	//sync
-	for j := 0; j < 200000; j++ {
+	for j := 0; j < 1; j++ {
 		distinctId = randomString()
 		err := te.Track(accountId, distinctId, "view_page", properties)
 		if err != nil {
@@ -117,7 +116,7 @@ func syncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, pro
 	}
 	err := te.Flush()
 	if err == nil {
-		fmt.Println("TE flush success")
+		fmt.Println("[Example] TE flush success")
 	} else {
 		fmt.Printf("TE flush error: %v", err.Error())
 	}
@@ -125,13 +124,13 @@ func syncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, pro
 
 func asyncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, properties map[string]interface{}) {
 	wg := sync.WaitGroup{}
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 1; i++ {
 		wg.Add(1)
 		distinctId = randomString()
 
 		go func(index int, distinctId string) {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for j := 0; j < 1; j++ {
 				err := te.Track(accountId, distinctId, fmt.Sprintf("ab___%v___%v", index, j), properties)
 				if err != nil {
 					fmt.Println(err)
@@ -142,7 +141,7 @@ func asyncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, pr
 	wg.Wait()
 	err := te.Flush()
 	if err == nil {
-		fmt.Println("TE flush success")
+		fmt.Println("[Example] TE flush success")
 	} else {
 		fmt.Printf("TE flush error: %v", err.Error())
 	}
@@ -153,20 +152,20 @@ func randomString() string {
 	return newUUID.String()
 }
 
-func generateLogConsumer() (thinkingdata.Consumer, error) {
+func generateLogConsumer() (thinkingdata.TDConsumer, error) {
 	// logConsumer config
-	config := thinkingdata.LogConfig{
+	config := thinkingdata.TDLogConsumerConfig{
 		FileNamePrefix: "test_prefix",
-		Directory:      "D:/log",
+		Directory:      "./log",
 		RotateMode:     thinkingdata.ROTATE_HOURLY,
 		FileSize:       200,
 	}
 	return thinkingdata.NewLogConsumerWithConfig(config)
 }
 
-func generateBatchConsumer() (thinkingdata.Consumer, error) {
-	config := thinkingdata.BatchConfig{
-		ServerUrl: "your serverUrl",
+func generateBatchConsumer() (thinkingdata.TDConsumer, error) {
+	config := thinkingdata.TDBatchConfig{
+		ServerUrl: "https://receiver-ta-uat.thinkingdata.cn",
 		AppId:     "your appId",
 		AutoFlush: true,
 		BatchSize: 100,
@@ -175,6 +174,6 @@ func generateBatchConsumer() (thinkingdata.Consumer, error) {
 	return thinkingdata.NewBatchConsumerWithConfig(config)
 }
 
-func generateDebugConsumer() (thinkingdata.Consumer, error) {
-	return thinkingdata.NewDebugConsumerWithDeviceId("url", "appid", false, "deviceId")
+func generateDebugConsumer() (thinkingdata.TDConsumer, error) {
+	return thinkingdata.NewDebugConsumerWithDeviceId("https://receiver-ta-uat.thinkingdata.cn", "appid", false, "deviceId")
 }
