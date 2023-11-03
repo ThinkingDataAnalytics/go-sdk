@@ -1,4 +1,4 @@
-module github.com/ThinkingDataAnalytics/go-sdk
+module github.com/ThinkingDataAnalytics/go-sdk/v2
 
 go 1.14
 
