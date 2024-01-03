@@ -17,7 +17,7 @@ const (
 	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "2.0.0"
+	SdkVersion = "2.0.1"
 	LibName    = "Golang"
 )
 
@@ -64,9 +64,9 @@ func New(c TDConsumer) TDAnalytics {
 // GetSuperProperties get common properties
 func (ta *TDAnalytics) GetSuperProperties() map[string]interface{} {
 	result := make(map[string]interface{})
-	ta.mutex.RLock()
+	ta.mutex.Lock()
 	mergeProperties(result, ta.superProperties)
-	ta.mutex.RUnlock()
+	ta.mutex.Unlock()
 	return result
 }
 
@@ -115,8 +115,10 @@ func (ta *TDAnalytics) TrackFirst(accountId, distinctId, eventName, firstCheckId
 		tdLogInfo(msg)
 		return errors.New(msg)
 	}
-	properties["#first_check_id"] = firstCheckId
-	return ta.track(accountId, distinctId, Track, eventName, "", properties)
+	p := make(map[string]interface{})
+	mergeProperties(p, properties)
+	p["#first_check_id"] = firstCheckId
+	return ta.track(accountId, distinctId, Track, eventName, "", p)
 }
 
 // TrackUpdate report updatable event
@@ -130,6 +132,12 @@ func (ta *TDAnalytics) TrackOverwrite(accountId, distinctId, eventName, eventId 
 }
 
 func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
+	defer func() {
+		if r := recover(); r != nil {
+			tdLogError("%+v\ndata: %+v", r, properties)
+		}
+	}()
+
 	if len(eventName) == 0 {
 		msg := "the event name must be provided"
 		tdLogError(msg)
@@ -144,17 +152,14 @@ func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId
 	}
 
 	p := ta.GetSuperProperties()
-
 	dynamicSuperProperties := ta.GetDynamicSuperProperties()
 
-	ta.mutex.Lock()
 	mergeProperties(p, dynamicSuperProperties)
 	// preset properties has the highest priority
 	p["#lib"] = LibName
 	p["#lib_version"] = SdkVersion
 	// custom properties
 	mergeProperties(p, properties)
-	ta.mutex.Unlock()
 
 	return ta.add(accountId, distinctId, dataType, eventName, eventId, p)
 }
@@ -204,15 +209,18 @@ func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
 }
 
 func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties map[string]interface{}) error {
+	defer func() {
+		if r := recover(); r != nil {
+			tdLogError("%+v\ndata: %+v", r, properties)
+		}
+	}()
 	if properties == nil && dataType != UserDel {
 		msg := "invalid params for " + dataType + ": properties is nil"
 		tdLogError(msg)
 		return errors.New(msg)
 	}
 	p := make(map[string]interface{})
-	ta.mutex.Lock()
 	mergeProperties(p, properties)
-	ta.mutex.Unlock()
 	return ta.add(accountId, distinctId, dataType, "", "", p)
 }
 

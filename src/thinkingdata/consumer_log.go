@@ -90,6 +90,9 @@ func NewLogConsumerWithConfig(config TDLogConsumerConfig) (TDConsumer, error) {
 func (c *TDLogConsumer) Add(d Data) error {
 	var err error = nil
 	c.mutex.Lock()
+	defer func() {
+		c.mutex.Unlock()
+	}()
 	if c.sdkClose {
 		err = errors.New("add event failed, SDK has been closed")
 		tdLogError(err.Error())
@@ -101,8 +104,6 @@ func (c *TDLogConsumer) Add(d Data) error {
 			c.ch <- jsonBytes
 		}
 	}
-	c.mutex.Unlock()
-
 	return err
 }
 

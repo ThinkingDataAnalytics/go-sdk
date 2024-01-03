@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/ThinkingDataAnalytics/go-sdk/src/thinkingdata"
+	"github.com/ThinkingDataAnalytics/go-sdk/v2/src/thinkingdata"
 	"github.com/google/uuid"
 	"sync"
 	"time"
@@ -21,13 +21,13 @@ type B struct {
 
 func main() {
 	// enable console log
-	thinkingdata.SetLogLevel(thinkingdata.TDLogLevelDebug)
+	thinkingdata.SetLogLevel(thinkingdata.TDLogLevelError)
 
 	// e.g. init consumer, you can choose different consumer
 
-	consumer, err := generateDebugConsumer() // TDDebugConsumer
+	//consumer, err := generateDebugConsumer() // TDDebugConsumer
 	//consumer, err := generateBatchConsumer() // TDBatchConsumer
-	//consumer, err := generateLogConsumer() // TDLogConsumer
+	consumer, err := generateLogConsumer() // TDLogConsumer
 
 	if err != nil {
 		// consumer init error
