@@ -197,7 +197,7 @@ func (c *TDLogConsumer) initLogFile() (*os.File, error) {
 		}
 	}
 	timeStr := time.Now().Format(c.dateFormat)
-	return os.OpenFile(c.constructFileName(timeStr, 0), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	return os.OpenFile(c.constructFileName(timeStr, 0), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
 }
 
 var logFileIndex = 0
@@ -210,7 +210,7 @@ func (c *TDLogConsumer) writeToFile(str string) {
 
 	if c.currentFile == nil {
 		var openFileErr error
-		c.currentFile, openFileErr = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+		c.currentFile, openFileErr = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
 		if openFileErr != nil {
 			tdLogInfo("open log file failed: %s\n", openFileErr)
 			return
@@ -232,7 +232,7 @@ func (c *TDLogConsumer) writeToFile(str string) {
 			tdLogInfo("close file failed: %s\n", err)
 			return
 		}
-		c.currentFile, err = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+		c.currentFile, err = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
 		if err != nil {
 			tdLogInfo("rotate log file failed: %s\n", err)
 			return

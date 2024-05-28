@@ -1,3 +1,10 @@
+### v2.0.2
+**Date:** 2024/05/28
+
+**Notes:**
+
+* Modify file access permissions
+
 ### v2.0.1
 **Date:** 2024/01/03
 
