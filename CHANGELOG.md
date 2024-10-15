@@ -1,3 +1,10 @@
+### v2.0.3
+**Date:** 2024/10/15
+
+**Notes:**
+
+* Support for passing app id in parameters
+
 ### v2.0.2
 **Date:** 2024/05/28
 

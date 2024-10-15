@@ -17,7 +17,7 @@ const (
 	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "2.0.2"
+	SdkVersion = "2.0.3"
 	LibName    = "Golang"
 )
 
@@ -172,7 +172,7 @@ func (ta *TDAnalytics) UserSet(accountId string, distinctId string, properties m
 // UserUnset clear the user properties of users.
 func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string) error {
 	if len(s) == 0 {
-		msg := "invalid params for UserUnset: properties is nil"
+		msg := "invalid params for UserUnset: keys is nil"
 		tdLogInfo(msg)
 		return errors.New(msg)
 	}
@@ -181,6 +181,15 @@ func (ta *TDAnalytics) UserUnset(accountId string, distinctId string, s []string
 		prop[v] = 0
 	}
 	return ta.user(accountId, distinctId, UserUnset, prop)
+}
+
+func (ta *TDAnalytics) UserUnsetWithProperties(accountId string, distinctId string, properties map[string]interface{}) error {
+	if len(properties) == 0 {
+		msg := "invalid params for UserUnset: properties is nil"
+		tdLogInfo(msg)
+		return errors.New(msg)
+	}
+	return ta.user(accountId, distinctId, UserUnset, properties)
 }
 
 // UserSetOnce set user properties, If such property had been set before, this message would be neglected.
@@ -206,6 +215,11 @@ func (ta *TDAnalytics) UserUniqAppend(accountId string, distinctId string, prope
 // UserDelete delete a user, This operation cannot be undone.
 func (ta *TDAnalytics) UserDelete(accountId string, distinctId string) error {
 	return ta.user(accountId, distinctId, UserDel, nil)
+}
+
+// UserDeleteWithProperties delete a user, This operation cannot be undone.
+func (ta *TDAnalytics) UserDeleteWithProperties(accountId string, distinctId string, properties map[string]interface{}) error {
+	return ta.user(accountId, distinctId, UserDel, properties)
 }
 
 func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties map[string]interface{}) error {
