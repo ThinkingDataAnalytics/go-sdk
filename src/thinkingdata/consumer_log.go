@@ -90,19 +90,20 @@ func NewLogConsumerWithConfig(config TDLogConsumerConfig) (TDConsumer, error) {
 func (c *TDLogConsumer) Add(d Data) error {
 	var err error = nil
 	c.mutex.Lock()
-	defer func() {
-		c.mutex.Unlock()
-	}()
 	if c.sdkClose {
 		err = errors.New("add event failed, SDK has been closed")
+	}
+	c.mutex.Unlock()
+	if err != nil {
 		tdLogError(err.Error())
+		return err
+	}
+
+	jsonBytes, jsonErr := json.Marshal(d)
+	if jsonErr != nil {
+		err = jsonErr
 	} else {
-		jsonBytes, jsonErr := json.Marshal(d)
-		if jsonErr != nil {
-			err = jsonErr
-		} else {
-			c.ch <- jsonBytes
-		}
+		c.ch <- jsonBytes
 	}
 	return err
 }
@@ -126,15 +127,9 @@ func (c *TDLogConsumer) Close() error {
 	if c.sdkClose {
 		err = errors.New("[ThinkingData][error]: SDK has been closed")
 	} else {
+		c.sdkClose = true
 		close(c.ch)
-		c.wg.Wait()
-		if c.currentFile != nil {
-			_ = c.currentFile.Sync()
-			err = c.currentFile.Close()
-			c.currentFile = nil
-		}
 	}
-	c.sdkClose = true
 	c.mutex.Unlock()
 	return err
 }
@@ -164,11 +159,14 @@ func (c *TDLogConsumer) init() error {
 	}
 	c.currentFile = fd
 
-	c.wg.Add(1)
-
 	go func() {
 		defer func() {
-			c.wg.Done()
+			if c.currentFile != nil {
+				_ = c.currentFile.Sync()
+				err = c.currentFile.Close()
+				c.currentFile = nil
+			}
+			tdLogInfo("Gracefully shutting down")
 		}()
 		for {
 			select {
@@ -210,7 +208,9 @@ func (c *TDLogConsumer) writeToFile(str string) {
 
 	if c.currentFile == nil {
 		var openFileErr error
+		c.mutex.Lock()
 		c.currentFile, openFileErr = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
+		c.mutex.Unlock()
 		if openFileErr != nil {
 			tdLogInfo("open log file failed: %s\n", openFileErr)
 			return
@@ -227,12 +227,15 @@ func (c *TDLogConsumer) writeToFile(str string) {
 		}
 	}
 	if newName != "" {
+		_ = c.currentFile.Sync()
 		err := c.currentFile.Close()
 		if err != nil {
 			tdLogInfo("close file failed: %s\n", err)
 			return
 		}
+		c.mutex.Lock()
 		c.currentFile, err = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
+		c.mutex.Unlock()
 		if err != nil {
 			tdLogInfo("rotate log file failed: %s\n", err)
 			return

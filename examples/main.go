@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/ThinkingDataAnalytics/go-sdk/v2/examples/mock_server"
 	"github.com/ThinkingDataAnalytics/go-sdk/v2/src/thinkingdata"
 	"github.com/google/uuid"
-	"sync"
 	"time"
 )
 
@@ -96,13 +96,8 @@ func main() {
 	// sync example
 	syncExample(&te, accountId, distinctId, properties)
 
-	//// async example
-	//asyncExample(&te, accountId, distinctId, properties)
-	//
-	//// async with http server.
-	//mock_server.Start(func() {
-	//	asyncExample(&te, accountId, distinctId, properties)
-	//})
+	// async with http server.
+	mock_server.Start(&te)
 }
 
 func syncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, properties map[string]interface{}) {
@@ -122,31 +117,6 @@ func syncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, pro
 	}
 }
 
-func asyncExample(te *thinkingdata.TDAnalytics, accountId, distinctId string, properties map[string]interface{}) {
-	wg := sync.WaitGroup{}
-	for i := 0; i < 1; i++ {
-		wg.Add(1)
-		distinctId = randomString()
-
-		go func(index int, distinctId string) {
-			defer wg.Done()
-			for j := 0; j < 1; j++ {
-				err := te.Track(accountId, distinctId, fmt.Sprintf("ab___%v___%v", index, j), properties)
-				if err != nil {
-					fmt.Println(err)
-				}
-			}
-		}(i, distinctId)
-	}
-	wg.Wait()
-	err := te.Flush()
-	if err == nil {
-		fmt.Println("[Example] TE flush success")
-	} else {
-		fmt.Printf("TE flush error: %v", err.Error())
-	}
-}
-
 func randomString() string {
 	newUUID, _ := uuid.NewUUID()
 	return newUUID.String()
@@ -158,7 +128,7 @@ func generateLogConsumer() (thinkingdata.TDConsumer, error) {
 		FileNamePrefix: "test_prefix",
 		Directory:      "./log",
 		RotateMode:     thinkingdata.ROTATE_HOURLY,
-		FileSize:       200,
+		FileSize:       1,
 	}
 	return thinkingdata.NewLogConsumerWithConfig(config)
 }
