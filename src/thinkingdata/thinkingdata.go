@@ -17,7 +17,7 @@ const (
 	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "2.1.0"
+	SdkVersion = "2.2.0"
 	LibName    = "Golang"
 )
 

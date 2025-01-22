@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -17,10 +18,9 @@ import (
 
 // TDBatchConsumer upload data to TE by http
 type TDBatchConsumer struct {
-	serverUrl   string        // serverUrl
-	appId       string        // appId
-	timeout     time.Duration // http timeout (mill second)
-	compress    bool          // is need compress
+	serverUrl   string // serverUrl
+	appId       string // appId
+	compress    bool   // is need compress
 	bufferMutex *sync.RWMutex
 	cacheMutex  *sync.RWMutex // cache mutex
 
@@ -28,17 +28,19 @@ type TDBatchConsumer struct {
 	batchSize     int      // flush event count each time
 	cacheBuffer   [][]Data // buffer
 	cacheCapacity int      // buffer max count
+	HttpClient    *http.Client
 }
 
 type TDBatchConfig struct {
-	ServerUrl     string // serverUrl
-	AppId         string // appId
-	BatchSize     int    // flush event count each time
-	Timeout       int    // http timeout (mill second)
-	Compress      bool   // enable compress data
-	AutoFlush     bool   // enable auto flush
-	Interval      int    // auto flush spacing (second)
-	CacheCapacity int    // cache event count
+	ServerUrl     string       // serverUrl
+	AppId         string       // appId
+	BatchSize     int          // flush event count each time
+	Timeout       int          // http timeout (mill second)
+	Compress      bool         // enable compress data
+	AutoFlush     bool         // enable auto flush
+	Interval      int          // auto flush spacing (second)
+	CacheCapacity int          // cache event count
+	HttpClient    *http.Client // Custom http client. Set this parameter when you want to use your own http client
 }
 
 const (
@@ -118,17 +120,21 @@ func initBatchConsumer(config TDBatchConfig) (TDConsumer, error) {
 		cacheCapacity = config.CacheCapacity
 	}
 
-	var timeout int
+	var timeout time.Duration
 	if config.Timeout == 0 {
-		timeout = DefaultTimeOut
+		timeout = time.Duration(DefaultTimeOut) * time.Millisecond
 	} else {
-		timeout = config.Timeout
+		timeout = time.Duration(config.Timeout) * time.Millisecond
+	}
+
+	httpClient := config.HttpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: timeout}
 	}
 
 	c := &TDBatchConsumer{
 		serverUrl:     u.String(),
 		appId:         config.AppId,
-		timeout:       time.Duration(timeout) * time.Millisecond,
 		compress:      config.Compress,
 		bufferMutex:   new(sync.RWMutex),
 		cacheMutex:    new(sync.RWMutex),
@@ -136,6 +142,7 @@ func initBatchConsumer(config TDBatchConfig) (TDConsumer, error) {
 		buffer:        make([]Data, 0, batchSize),
 		cacheCapacity: cacheCapacity,
 		cacheBuffer:   make([][]Data, 0, cacheCapacity),
+		HttpClient:    httpClient,
 	}
 
 	var interval int
@@ -244,10 +251,16 @@ func (c *TDBatchConsumer) uploadEvents() error {
 					tdLogError(msg)
 					return fmt.Errorf(msg)
 				}
-			}
-			if err != nil {
-				if i == 2 {
+			} else {
+				if err != nil {
+					tdLogError(err.Error())
 					return err
+				} else {
+					if i == 2 {
+						msg := fmt.Sprintf("network error, but err is nil. Status code is: %v", statusCode)
+						tdLogError(msg)
+						return fmt.Errorf(msg)
+					}
 				}
 			}
 		}
@@ -298,14 +311,18 @@ func (c *TDBatchConsumer) send(data string, size int) (statusCode int, code int,
 	req.Header["TA-Integration-Type"] = []string{LibName}
 	req.Header["TA-Integration-Version"] = []string{SdkVersion}
 	req.Header["TA-Integration-Count"] = []string{strconv.Itoa(size)}
-	client := &http.Client{Timeout: c.timeout}
-	resp, err = client.Do(req)
+	resp, err = c.HttpClient.Do(req)
 
 	if err != nil {
 		return 0, 0, err
 	}
 
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			tdLogError("close response body error: %v", err)
+		}
+	}(resp.Body)
 
 	if resp.StatusCode == http.StatusOK {
 		body, _ := ioutil.ReadAll(resp.Body)
