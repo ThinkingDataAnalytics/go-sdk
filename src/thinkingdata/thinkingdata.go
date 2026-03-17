@@ -17,7 +17,7 @@ const (
 	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "2.2.0"
+	SdkVersion = "2.3.0"
 	LibName    = "Golang"
 )
 
@@ -33,6 +33,8 @@ type Data struct {
 	Ip           string                 `json:"#ip,omitempty"`
 	UUID         string                 `json:"#uuid,omitempty"`
 	AppId        string                 `json:"#app_id,omitempty"`
+	TransactionProperty string                 `json:"#transaction_property,omitempty"`
+	ImportToolId        string                 `json:"#import_tool_id,omitempty"`
 	Properties   map[string]interface{} `json:"properties"`
 }
 
@@ -268,6 +270,10 @@ func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId s
 
 	firstCheckId := extractStringProperty(properties, "#first_check_id")
 
+	transactionProperty := extractStringProperty(properties, "#transaction_property")
+
+	importToolId := extractStringProperty(properties, "#import_tool_id")
+
 	// get "#uuid" value in properties, empty string will be return when not found.
 	uuid := extractStringProperty(properties, "#uuid")
 	if len(uuid) == 0 {
@@ -284,6 +290,8 @@ func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId s
 		FirstCheckId: firstCheckId,
 		Ip:           ip,
 		UUID:         uuid,
+		TransactionProperty: transactionProperty,
+		ImportToolId:        importToolId,
 		Properties:   properties,
 	}
 

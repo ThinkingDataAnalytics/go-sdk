@@ -38,6 +38,10 @@ func SetLogLevel(level TDLogLevel) {
 	}
 }
 
+func GetLogLevel() TDLogLevel {
+	return currentLogLevel
+}
+
 // SetCustomLogger Set a custom log input class, usually you don't need to set it up.
 func SetCustomLogger(logger TDLogger) {
 	if logger != nil {

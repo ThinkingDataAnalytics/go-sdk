@@ -172,7 +172,16 @@ func (c *TDBatchConsumer) Add(d Data) error {
 	c.buffer = append(c.buffer, d)
 	c.bufferMutex.Unlock()
 
-	tdLogInfo("Enqueue event data: %v", d)
+	// log info
+	if GetLogLevel() <= TDLogLevelInfo {
+		jsonBytes, err := json.Marshal(d)
+		if err != nil {
+			tdLogError(err.Error())
+			return err
+		}
+		eventString := parseTime(jsonBytes)
+		tdLogInfo("Enqueue event data: %s", eventString)
+	}
 
 	if c.getBufferLength() >= c.batchSize || c.getCacheLength() > 0 {
 		err := c.Flush()
