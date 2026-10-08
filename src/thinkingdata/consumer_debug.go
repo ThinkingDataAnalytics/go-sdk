@@ -1,20 +1,24 @@
 package thinkingdata
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 )
 
 // TDDebugConsumer The data is reported one by one, and when an error occurs, the log will be printed on the console.
 type TDDebugConsumer struct {
-	serverUrl string // serverUrl
-	appId     string // appId
-	writeData bool   // is archive to TE
-	deviceId  string // be used to debug in TE
+	serverUrl  string       // serverUrl
+	appId      string       // appId
+	writeData  bool         // is archive to TE
+	deviceId   string       // be used to debug in TE
+	HttpClient *http.Client // optional custom client; nonpositive timeout uses the SDK default
 }
 
 // NewDebugConsumer init TDDebugConsumer
@@ -27,9 +31,6 @@ func NewDebugConsumerWithWriter(serverUrl string, appId string, writeData bool) 
 }
 
 func NewDebugConsumerWithDeviceId(serverUrl string, appId string, writeData bool, deviceId string) (TDConsumer, error) {
-	// enable console log
-	SetLogLevel(TDLogLevelDebug)
-
 	if len(serverUrl) <= 0 {
 		msg := fmt.Sprint("ServerUrl not be empty")
 		tdLogError(msg)
@@ -43,8 +44,10 @@ func NewDebugConsumerWithDeviceId(serverUrl string, appId string, writeData bool
 
 	u.Path = "/data_debug"
 
-	c := &TDDebugConsumer{serverUrl: u.String(), appId: appId, writeData: writeData, deviceId: deviceId}
+	c := &TDDebugConsumer{serverUrl: u.String(), appId: appId, writeData: writeData, deviceId: deviceId, HttpClient: &http.Client{Timeout: time.Duration(DefaultTimeOut) * time.Millisecond}}
 
+	// Enable debug logging only after initialization succeeds.
+	SetLogLevel(TDLogLevelDebug)
 	tdLogInfo("Mode: debug consumer, appId: %s, serverUrl: %s", c.appId, c.serverUrl)
 
 	return c, nil
@@ -70,12 +73,10 @@ func (c *TDDebugConsumer) Add(d Data) error {
 }
 
 func (c *TDDebugConsumer) Flush() error {
-	tdLogInfo("flush data")
 	return nil
 }
 
 func (c *TDDebugConsumer) Close() error {
-	tdLogInfo("debug consumer close")
 	return nil
 }
 
@@ -92,7 +93,22 @@ func (c *TDDebugConsumer) send(data string) error {
 	if len(c.deviceId) > 0 {
 		postData.Add("deviceId", c.deviceId)
 	}
-	resp, err := http.PostForm(c.serverUrl, postData)
+	client := c.HttpClient
+	if client == nil {
+		client = &http.Client{}
+	}
+	timeout := client.Timeout
+	if timeout <= 0 {
+		timeout = time.Duration(DefaultTimeOut) * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", c.serverUrl, strings.NewReader(postData.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -100,13 +116,21 @@ func (c *TDDebugConsumer) send(data string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
-		result := map[string]interface{}{}
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read debug response: %w", err)
+		}
+		var result struct {
+			ErrorLevel *int `json:"errorLevel"`
+		}
 		err = json.Unmarshal(body, &result)
 		if err != nil {
 			return err
 		}
-		if uint64(result["errorLevel"].(float64)) != 0 {
+		if result.ErrorLevel == nil {
+			return errors.New("invalid debug response: errorLevel is missing or null")
+		}
+		if *result.ErrorLevel != 0 {
 			msg := fmt.Sprintf("send to receiver failed with return content:  %s", string(body))
 			tdLogError(msg)
 			return errors.New(msg)

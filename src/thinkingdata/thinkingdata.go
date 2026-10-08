@@ -2,6 +2,7 @@ package thinkingdata
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -17,25 +18,25 @@ const (
 	UserUniqAppend = "user_uniq_append"
 	UserDel        = "user_del"
 
-	SdkVersion = "2.3.0"
+	SdkVersion = "2.3.1"
 	LibName    = "Golang"
 )
 
 type Data struct {
-	IsComplex    bool                   `json:"-"` // properties are nested or not
-	AccountId    string                 `json:"#account_id,omitempty"`
-	DistinctId   string                 `json:"#distinct_id,omitempty"`
-	Type         string                 `json:"#type"`
-	Time         string                 `json:"#time"`
-	EventName    string                 `json:"#event_name,omitempty"`
-	EventId      string                 `json:"#event_id,omitempty"`
-	FirstCheckId string                 `json:"#first_check_id,omitempty"`
-	Ip           string                 `json:"#ip,omitempty"`
-	UUID         string                 `json:"#uuid,omitempty"`
-	AppId        string                 `json:"#app_id,omitempty"`
+	IsComplex           bool                   `json:"-"` // properties are nested or not
+	AccountId           string                 `json:"#account_id,omitempty"`
+	DistinctId          string                 `json:"#distinct_id,omitempty"`
+	Type                string                 `json:"#type"`
+	Time                string                 `json:"#time"`
+	EventName           string                 `json:"#event_name,omitempty"`
+	EventId             string                 `json:"#event_id,omitempty"`
+	FirstCheckId        string                 `json:"#first_check_id,omitempty"`
+	Ip                  string                 `json:"#ip,omitempty"`
+	UUID                string                 `json:"#uuid,omitempty"`
+	AppId               string                 `json:"#app_id,omitempty"`
 	TransactionProperty string                 `json:"#transaction_property,omitempty"`
 	ImportToolId        string                 `json:"#import_tool_id,omitempty"`
-	Properties   map[string]interface{} `json:"properties"`
+	Properties          map[string]interface{} `json:"properties"`
 }
 
 // TDConsumer define operation interface
@@ -98,10 +99,12 @@ func (ta *TDAnalytics) SetDynamicSuperProperties(action func() map[string]interf
 func (ta *TDAnalytics) GetDynamicSuperProperties() map[string]interface{} {
 	result := make(map[string]interface{})
 	ta.mutex.RLock()
-	if ta.dynamicSuperProperties != nil {
-		mergeProperties(result, ta.dynamicSuperProperties())
-	}
+	action := ta.dynamicSuperProperties
 	ta.mutex.RUnlock()
+	// User callbacks may reenter the SDK or panic; never execute them under the lock.
+	if action != nil {
+		mergeProperties(result, action())
+	}
 	return result
 }
 
@@ -134,36 +137,33 @@ func (ta *TDAnalytics) TrackOverwrite(accountId, distinctId, eventName, eventId 
 }
 
 func (ta *TDAnalytics) track(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
-	defer func() {
-		if r := recover(); r != nil {
-			tdLogError("%+v\ndata: %+v", r, properties)
+	return withPanicRecovery(func() error {
+
+		if len(eventName) == 0 {
+			msg := "the event name must be provided"
+			tdLogError(msg)
+			return errors.New(msg)
 		}
-	}()
 
-	if len(eventName) == 0 {
-		msg := "the event name must be provided"
-		tdLogError(msg)
-		return errors.New(msg)
-	}
+		// eventId not be null unless eventType is equal Track.
+		if len(eventId) == 0 && dataType != Track {
+			msg := "the event id must be provided"
+			tdLogError(msg)
+			return errors.New(msg)
+		}
 
-	// eventId not be null unless eventType is equal Track.
-	if len(eventId) == 0 && dataType != Track {
-		msg := "the event id must be provided"
-		tdLogError(msg)
-		return errors.New(msg)
-	}
+		p := ta.GetSuperProperties()
+		dynamicSuperProperties := ta.GetDynamicSuperProperties()
 
-	p := ta.GetSuperProperties()
-	dynamicSuperProperties := ta.GetDynamicSuperProperties()
+		mergeProperties(p, dynamicSuperProperties)
+		// preset properties has the highest priority
+		p["#lib"] = LibName
+		p["#lib_version"] = SdkVersion
+		// custom properties
+		mergeProperties(p, properties)
 
-	mergeProperties(p, dynamicSuperProperties)
-	// preset properties has the highest priority
-	p["#lib"] = LibName
-	p["#lib_version"] = SdkVersion
-	// custom properties
-	mergeProperties(p, properties)
-
-	return ta.add(accountId, distinctId, dataType, eventName, eventId, p)
+		return ta.add(accountId, distinctId, dataType, eventName, eventId, p)
+	})
 }
 
 // UserSet set user properties. would overwrite existing names.
@@ -225,19 +225,16 @@ func (ta *TDAnalytics) UserDeleteWithProperties(accountId string, distinctId str
 }
 
 func (ta *TDAnalytics) user(accountId, distinctId, dataType string, properties map[string]interface{}) error {
-	defer func() {
-		if r := recover(); r != nil {
-			tdLogError("%+v\ndata: %+v", r, properties)
+	return withPanicRecovery(func() error {
+		if properties == nil && dataType != UserDel {
+			msg := "invalid params for " + dataType + ": properties is nil"
+			tdLogError(msg)
+			return errors.New(msg)
 		}
-	}()
-	if properties == nil && dataType != UserDel {
-		msg := "invalid params for " + dataType + ": properties is nil"
-		tdLogError(msg)
-		return errors.New(msg)
-	}
-	p := make(map[string]interface{})
-	mergeProperties(p, properties)
-	return ta.add(accountId, distinctId, dataType, "", "", p)
+		p := make(map[string]interface{})
+		mergeProperties(p, properties)
+		return ta.add(accountId, distinctId, dataType, "", "", p)
+	})
 }
 
 // Flush report data immediately.
@@ -247,9 +244,7 @@ func (ta *TDAnalytics) Flush() error {
 
 // Close and exit sdk
 func (ta *TDAnalytics) Close() error {
-	err := ta.consumer.Close()
-	tdLogInfo("SDK close")
-	return err
+	return ta.consumer.Close()
 }
 
 func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId string, properties map[string]interface{}) error {
@@ -281,18 +276,18 @@ func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId s
 	}
 
 	data := Data{
-		AccountId:    accountId,
-		DistinctId:   distinctId,
-		Type:         dataType,
-		Time:         eventTime,
-		EventName:    eventName,
-		EventId:      eventId,
-		FirstCheckId: firstCheckId,
-		Ip:           ip,
-		UUID:         uuid,
+		AccountId:           accountId,
+		DistinctId:          distinctId,
+		Type:                dataType,
+		Time:                eventTime,
+		EventName:           eventName,
+		EventId:             eventId,
+		FirstCheckId:        firstCheckId,
+		Ip:                  ip,
+		UUID:                uuid,
 		TransactionProperty: transactionProperty,
 		ImportToolId:        importToolId,
-		Properties:   properties,
+		Properties:          properties,
 	}
 
 	if len(appId) > 0 {
@@ -310,4 +305,23 @@ func (ta *TDAnalytics) add(accountId, distinctId, dataType, eventName, eventId s
 // Deprecated: please use TDConsumer
 type Consumer interface {
 	TDConsumer
+}
+
+// withPanicRecovery returns an error even for panic(nil) on older Go runtimes.
+// Do not invoke the logger here: a user logger may itself have caused the panic.
+func withPanicRecovery(action func() error) (err error) {
+	completed := false
+	defer func() {
+		if !completed {
+			value := recover()
+			if cause, ok := value.(error); ok {
+				err = fmt.Errorf("thinkingdata: recovered panic: %w", cause)
+			} else {
+				err = fmt.Errorf("thinkingdata: recovered panic: %v", value)
+			}
+		}
+	}()
+	err = action()
+	completed = true
+	return err
 }

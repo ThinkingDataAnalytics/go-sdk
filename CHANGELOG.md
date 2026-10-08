@@ -1,3 +1,9 @@
+### v2.3.1
+**Date:** 2026/10/08
+
+**Notes:**
+
+* Improve SDK stability
 
 ### v2.3.0
 **Date:** 2026/03/17

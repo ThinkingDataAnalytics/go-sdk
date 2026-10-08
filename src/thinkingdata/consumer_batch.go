@@ -3,6 +3,7 @@ package thinkingdata
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,18 +25,28 @@ type TDBatchConsumer struct {
 	bufferMutex *sync.RWMutex
 	cacheMutex  *sync.RWMutex // cache mutex
 
-	buffer        []Data
-	batchSize     int      // flush event count each time
-	cacheBuffer   [][]Data // buffer
-	cacheCapacity int      // buffer max count
+	buffer        []json.RawMessage
+	batchSize     int                 // event count threshold for triggering a flush
+	cacheBuffer   [][]json.RawMessage // buffer
+	cacheCapacity int                 // buffer max count
 	HttpClient    *http.Client
+	closing       uint32
+	closeOnce     sync.Once
+	closeDone     chan struct{}
+	closeErr      error // published when closeDone closes
+	stopAutoFlush chan struct{}
+	autoFlushDone chan struct{}
+	ticker        *time.Ticker
+	sendGate      chan struct{} // serializes senders, never queue admission
+	emittingLogs  uint32
+	timeout       time.Duration
 }
 
 type TDBatchConfig struct {
 	ServerUrl     string       // serverUrl
 	AppId         string       // appId
-	BatchSize     int          // flush event count each time
-	Timeout       int          // http timeout (mill second)
+	BatchSize     int          // event count threshold for triggering a flush
+	Timeout       int          // request deadline in milliseconds, including custom clients
 	Compress      bool         // enable compress data
 	AutoFlush     bool         // enable auto flush
 	Interval      int          // auto flush spacing (second)
@@ -94,7 +105,7 @@ func NewBatchConsumerWithConfig(config TDBatchConfig) (TDConsumer, error) {
 
 func initBatchConsumer(config TDBatchConfig) (TDConsumer, error) {
 	if config.ServerUrl == "" {
-		msg := fmt.Sprint("ServerUrl not be empty")
+		msg := "ServerUrl not be empty"
 		tdLogInfo(msg)
 		return nil, errors.New(msg)
 	}
@@ -103,6 +114,11 @@ func initBatchConsumer(config TDBatchConfig) (TDConsumer, error) {
 		return nil, err
 	}
 	u.Path = "/sync_server"
+
+	interval, err := batchFlushInterval(config.Interval)
+	if err != nil {
+		return nil, err
+	}
 
 	var batchSize int
 	if config.BatchSize > MaxBatchSize {
@@ -120,11 +136,9 @@ func initBatchConsumer(config TDBatchConfig) (TDConsumer, error) {
 		cacheCapacity = config.CacheCapacity
 	}
 
-	var timeout time.Duration
-	if config.Timeout == 0 {
-		timeout = time.Duration(DefaultTimeOut) * time.Millisecond
-	} else {
-		timeout = time.Duration(config.Timeout) * time.Millisecond
+	timeout, err := batchRequestTimeout(config.Timeout)
+	if err != nil {
+		return nil, err
 	}
 
 	httpClient := config.HttpClient
@@ -139,27 +153,22 @@ func initBatchConsumer(config TDBatchConfig) (TDConsumer, error) {
 		bufferMutex:   new(sync.RWMutex),
 		cacheMutex:    new(sync.RWMutex),
 		batchSize:     batchSize,
-		buffer:        make([]Data, 0, batchSize),
+		buffer:        make([]json.RawMessage, 0, batchSize),
 		cacheCapacity: cacheCapacity,
-		cacheBuffer:   make([][]Data, 0, cacheCapacity),
+		cacheBuffer:   make([][]json.RawMessage, 0, cacheCapacity),
 		HttpClient:    httpClient,
+		closeDone:     make(chan struct{}),
+		stopAutoFlush: make(chan struct{}),
+		autoFlushDone: make(chan struct{}),
+		sendGate:      make(chan struct{}, 1),
+		timeout:       timeout,
 	}
 
-	var interval int
-	if config.Interval == 0 {
-		interval = DefaultInterval
-	} else {
-		interval = config.Interval
-	}
 	if config.AutoFlush {
-		go func() {
-			ticker := time.NewTicker(time.Duration(interval) * time.Second)
-			defer ticker.Stop()
-			for {
-				<-ticker.C
-				_ = c.timerFlush()
-			}
-		}()
+		c.ticker = time.NewTicker(interval)
+		go c.runAutoFlush()
+	} else {
+		close(c.autoFlushDone)
 	}
 
 	tdLogInfo("Mode: batch consumer, appId: %s, serverUrl: %s", c.appId, c.serverUrl)
@@ -167,137 +176,257 @@ func initBatchConsumer(config TDBatchConfig) (TDConsumer, error) {
 	return c, nil
 }
 
-func (c *TDBatchConsumer) Add(d Data) error {
-	c.bufferMutex.Lock()
-	c.buffer = append(c.buffer, d)
-	c.bufferMutex.Unlock()
+var errBatchConsumerClosed = errors.New("batch consumer has been closed")
 
-	// log info
-	if GetLogLevel() <= TDLogLevelInfo {
-		jsonBytes, err := json.Marshal(d)
-		if err != nil {
-			tdLogError(err.Error())
-			return err
+func (c *TDBatchConsumer) runAutoFlush() {
+	defer close(c.autoFlushDone)
+	defer c.ticker.Stop()
+	for {
+		select {
+		case <-c.stopAutoFlush:
+			return
+		case <-c.ticker.C:
+			if atomic.LoadUint32(&c.closing) != 0 {
+				return
+			}
+			_ = c.timerFlush()
 		}
-		eventString := parseTime(jsonBytes)
-		tdLogInfo("Enqueue event data: %s", eventString)
 	}
+}
 
-	if c.getBufferLength() >= c.batchSize || c.getCacheLength() > 0 {
-		err := c.Flush()
+// Validate seconds before multiplication: overflow can produce a negative or
+// unexpectedly small positive duration. Zero retains the default interval.
+func batchFlushInterval(seconds int) (time.Duration, error) {
+	if seconds == 0 {
+		seconds = DefaultInterval
+	}
+	const maxSeconds = int64((1<<63 - 1) / time.Second)
+	if seconds < 0 || int64(seconds) > maxSeconds {
+		return 0, fmt.Errorf("invalid Interval %d: must be between 0 and %d seconds", seconds, maxSeconds)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func batchRequestTimeout(milliseconds int) (time.Duration, error) {
+	if milliseconds == 0 {
+		milliseconds = DefaultTimeOut
+	}
+	const maxMilliseconds = int64((1<<63 - 1) / time.Millisecond)
+	if milliseconds < 0 || int64(milliseconds) > maxMilliseconds {
+		return 0, fmt.Errorf("invalid Timeout %d: must be between 0 and %d milliseconds", milliseconds, maxMilliseconds)
+	}
+	return time.Duration(milliseconds) * time.Millisecond, nil
+}
+
+// Add accepts an immutable event snapshot. Threshold-triggered sends remain
+// synchronous; producers can enqueue while another request is in flight.
+func (c *TDBatchConsumer) Add(d Data) error {
+	if atomic.LoadUint32(&c.closing) != 0 {
+		return errBatchConsumerClosed
+	}
+	var jsonBytes []byte
+	err := withPanicRecovery(func() error {
+		var err error
+		jsonBytes, err = json.Marshal(d)
+		return err
+	})
+	if err != nil {
 		return err
 	}
-
+	c.bufferMutex.Lock()
+	if atomic.LoadUint32(&c.closing) != 0 {
+		c.bufferMutex.Unlock()
+		return errBatchConsumerClosed
+	}
+	c.buffer = append(c.buffer, json.RawMessage(jsonBytes))
+	ready := len(c.buffer) >= c.batchSize
+	c.bufferMutex.Unlock()
+	if GetLogLevel() >= TDLogLevelInfo {
+		c.emitLogs(batchLogs{{level: TDLogLevelInfo, format: "Enqueue event data: %s", args: []interface{}{parseTime(jsonBytes)}}})
+	}
+	if ready || c.getCacheLength() > 0 {
+		return c.Flush()
+	}
 	return nil
 }
 
-func (c *TDBatchConsumer) timerFlush() error {
-	tdLogInfo("timer flush data")
-	return c.innerFlush()
+func (c *TDBatchConsumer) timerFlush() error { return c.innerFlush() }
+
+func (c *TDBatchConsumer) Flush() error { return c.innerFlush() }
+
+// Batch diagnostics are emitted only after releasing sender ownership.
+type batchLogEntry struct {
+	level  TDLogLevel
+	format string
+	args   []interface{}
 }
 
-func (c *TDBatchConsumer) Flush() error {
-	tdLogInfo("flush data")
-	return c.innerFlush()
+type batchLogs []batchLogEntry
+
+func (logs *batchLogs) add(level TDLogLevel, format string, args ...interface{}) {
+	*logs = append(*logs, batchLogEntry{level: level, format: format, args: args})
 }
 
 func (c *TDBatchConsumer) innerFlush() error {
+	var logs batchLogs
+	err := c.flushWithLogs(&logs)
+	return c.finishFlush(err, logs)
+}
 
+// Suppress nested/concurrent diagnostics for this consumer while a logger is
+// running. This prevents log callbacks from producing an unbounded log loop;
+// the underlying operations and their returned errors are unaffected.
+func (c *TDBatchConsumer) emitLogs(logs batchLogs) {
+	if len(logs) == 0 || !atomic.CompareAndSwapUint32(&c.emittingLogs, 0, 1) {
+		return
+	}
+	defer atomic.StoreUint32(&c.emittingLogs, 0)
+	for _, entry := range logs {
+		tdLog(entry.level, entry.format, entry.args...)
+	}
+}
+
+func (c *TDBatchConsumer) finishFlush(err error, logs batchLogs) error {
+	if err == errBatchConsumerClosed {
+		<-c.closeDone
+		return c.closeErr
+	}
+	c.emitLogs(logs)
+	return err
+}
+
+func (c *TDBatchConsumer) flushWithLogs(logs *batchLogs) error {
+	c.sendGate <- struct{}{}
+	defer func() { <-c.sendGate }()
+	return c.flushWithGate(logs, false, false)
+}
+
+// Caller owns sendGate. Queue locks cover snapshot extraction/restoration only;
+// compression, HTTP requests and retries never hold admission/cache locks.
+func (c *TDBatchConsumer) flushWithGate(logs *batchLogs, all, closing bool) error {
 	c.cacheMutex.Lock()
-	defer c.cacheMutex.Unlock()
-
 	c.bufferMutex.Lock()
-	defer c.bufferMutex.Unlock()
-
-	if len(c.buffer) == 0 && len(c.cacheBuffer) == 0 {
-		return nil
+	if !closing && atomic.LoadUint32(&c.closing) != 0 {
+		c.bufferMutex.Unlock()
+		c.cacheMutex.Unlock()
+		return errBatchConsumerClosed
 	}
-
-	defer func() {
-		if len(c.cacheBuffer) > c.cacheCapacity {
-			c.cacheBuffer = c.cacheBuffer[1:]
-		}
-	}()
-
-	if len(c.cacheBuffer) == 0 || len(c.buffer) >= c.batchSize {
+	if len(c.buffer) > 0 && (all || len(c.cacheBuffer) == 0 || len(c.buffer) >= c.batchSize) {
 		c.cacheBuffer = append(c.cacheBuffer, c.buffer)
-		c.buffer = make([]Data, 0, c.batchSize)
+		c.buffer = make([]json.RawMessage, 0, c.batchSize)
 	}
-
-	err := c.uploadEvents()
-
-	return err
+	count := len(c.cacheBuffer)
+	if !all && count > 1 {
+		count = 1
+	}
+	pending := append([][]json.RawMessage(nil), c.cacheBuffer[:count]...)
+	c.cacheBuffer = c.cacheBuffer[count:]
+	c.bufferMutex.Unlock()
+	c.cacheMutex.Unlock()
+	var retained [][]json.RawMessage
+	var firstErr error
+	for _, batch := range pending {
+		discard := false
+		err := withPanicRecovery(func() error {
+			var err error
+			discard, err = c.uploadEvents(batch, logs)
+			return err
+		})
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if !discard {
+			retained = append(retained, batch)
+		}
+		// This also reports recovered panics from a custom HTTP transport.
+		if err != nil {
+			logs.add(TDLogLevelError, "%v", err)
+		}
+	}
+	c.cacheMutex.Lock()
+	c.cacheBuffer = append(retained, c.cacheBuffer...)
+	if len(c.cacheBuffer) > c.cacheCapacity {
+		c.cacheBuffer = c.cacheBuffer[len(c.cacheBuffer)-c.cacheCapacity:]
+	}
+	c.cacheMutex.Unlock()
+	return firstErr
 }
 
-func (c *TDBatchConsumer) uploadEvents() error {
-	buffer := c.cacheBuffer[0]
-
+// discard is true for every HTTP 200 response, preserving the deletion policy.
+func (c *TDBatchConsumer) uploadEvents(buffer []json.RawMessage, logs *batchLogs) (discard bool, err error) {
 	jsonBytes, err := json.Marshal(buffer)
-	if err == nil {
-		params := parseTime(jsonBytes)
-		for i := 0; i < 3; i++ {
-			statusCode, code, err := c.send(params, len(buffer))
-			if statusCode == 200 {
-				c.cacheBuffer = c.cacheBuffer[1:]
-				switch code {
-				case 0:
-					tdLogInfo("send success： %v", params)
-					return nil
-				case 1, -1:
-					msg := "invalid data format"
-					tdLogError(msg)
-					return fmt.Errorf(msg)
-				case -2:
-					msg := "APP ID doesn't exist"
-					tdLogError(msg)
-					return fmt.Errorf(msg)
-				case -3:
-					msg := "invalid ip transmission"
-					tdLogError(msg)
-					return fmt.Errorf(msg)
-				default:
-					msg := "unknown error"
-					tdLogError(msg)
-					return fmt.Errorf(msg)
-				}
-			} else {
-				if err != nil {
-					tdLogError(err.Error())
-					return err
-				} else {
-					if i == 2 {
-						msg := fmt.Sprintf("network error, but err is nil. Status code is: %v", statusCode)
-						tdLogError(msg)
-						return fmt.Errorf(msg)
-					}
-				}
+	if err != nil {
+		return false, err
+	}
+	params := parseTime(jsonBytes)
+	for i := 0; i < 3; i++ {
+		statusCode, code, err := c.send(params, len(buffer), logs)
+		if statusCode == http.StatusOK {
+			if err != nil {
+				return true, err
+			}
+			switch code {
+			case 0:
+				logs.add(TDLogLevelInfo, "send success： %v", params)
+				return true, nil
+			case 1, -1:
+				return true, errors.New("invalid data format")
+			case -2:
+				return true, errors.New("APP ID doesn't exist")
+			case -3:
+				return true, errors.New("invalid ip transmission")
+			default:
+				return true, errors.New("unknown error")
 			}
 		}
+		if err != nil {
+			return false, err
+		}
+		if i == 2 {
+			return false, fmt.Errorf("network error, but err is nil. Status code is: %v", statusCode)
+		}
 	}
-	return err
+	return false, nil
 }
 
+// FlushAll attempts each currently buffered batch, continuing after failures.
+// HTTP 200 batches are removed as before; undelivered batches remain cached.
 func (c *TDBatchConsumer) FlushAll() error {
-	for c.getCacheLength() > 0 || c.getBufferLength() > 0 {
-		if err := c.Flush(); err != nil {
-			if !strings.Contains(err.Error(), "ThinkingDataError") {
-				return err
-			}
-		}
-	}
-	return nil
+	var logs batchLogs
+	err := c.flushAllWithLogs(&logs, false)
+	return c.finishFlush(err, logs)
 }
 
+func (c *TDBatchConsumer) flushAllWithLogs(logs *batchLogs, closing bool) error {
+	c.sendGate <- struct{}{}
+	defer func() { <-c.sendGate }()
+	return c.flushWithGate(logs, true, closing)
+}
+
+// Close stops admission and automatic flushing, then attempts every accepted
+// batch. Repeated calls return the same result and do not resend failed batches.
 func (c *TDBatchConsumer) Close() error {
-	tdLogInfo("batch consumer close")
-	return c.FlushAll()
+	var logs batchLogs
+	c.closeOnce.Do(func() {
+		atomic.StoreUint32(&c.closing, 1)
+		defer close(c.closeDone)
+		if c.ticker != nil {
+			c.ticker.Stop()
+		}
+		close(c.stopAutoFlush)
+		c.closeErr = withPanicRecovery(func() error { return c.flushAllWithLogs(&logs, true) })
+	})
+	// Publish completion before invoking user loggers: they may reenter Close.
+	// Do not join the timer here: Close can itself be called by a timer log callback.
+	c.emitLogs(logs)
+	return c.closeErr
 }
 
 func (c *TDBatchConsumer) IsStringent() bool {
 	return false
 }
 
-func (c *TDBatchConsumer) send(data string, size int) (statusCode int, code int, err error) {
+func (c *TDBatchConsumer) send(data string, size int, logs *batchLogs) (statusCode int, code int, err error) {
 	var encodedData string
 	var compressType = "gzip"
 	if c.compress {
@@ -312,7 +441,12 @@ func (c *TDBatchConsumer) send(data string, size int) (statusCode int, code int,
 	postData := bytes.NewBufferString(encodedData)
 
 	var resp *http.Response
-	req, _ := http.NewRequest("POST", c.serverUrl, postData)
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", c.serverUrl, postData)
+	if err != nil {
+		return 0, 0, err
+	}
 	req.Header["appid"] = []string{c.appId}
 	req.Header.Set("user-agent", "ta-go-sdk")
 	req.Header.Set("version", SdkVersion)
@@ -329,22 +463,27 @@ func (c *TDBatchConsumer) send(data string, size int) (statusCode int, code int,
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			tdLogError("close response body error: %v", err)
+			logs.add(TDLogLevelError, "close response body error: %v", err)
 		}
 	}(resp.Body)
 
 	if resp.StatusCode == http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
-		var result struct {
-			Code int
-		}
-
-		err = json.Unmarshal(body, &result)
+		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			return resp.StatusCode, 1, err
+			return resp.StatusCode, 1, fmt.Errorf("read batch response: %w", err)
+		}
+		var result struct {
+			Code *int `json:"code"`
 		}
 
-		return resp.StatusCode, result.Code, nil
+		if err := json.Unmarshal(body, &result); err != nil {
+			return resp.StatusCode, 1, fmt.Errorf("decode batch response: %w", err)
+		}
+		if result.Code == nil {
+			return resp.StatusCode, 1, errors.New("invalid batch response: code is missing or null")
+		}
+
+		return resp.StatusCode, *result.Code, nil
 	} else {
 		return resp.StatusCode, -1, nil
 	}

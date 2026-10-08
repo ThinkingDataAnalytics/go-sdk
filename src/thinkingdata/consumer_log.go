@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,15 +23,31 @@ const (
 
 // TDLogConsumer write data to file, it works with LogBus
 type TDLogConsumer struct {
-	directory      string   // directory of log file
-	dateFormat     string   // name format of log file
-	fileSize       int64    // max size of single log file (MByte)
-	fileNamePrefix string   // prefix of log file
-	currentFile    *os.File // current file handler
-	wg             sync.WaitGroup
-	ch             chan []byte
+	directory      string  // directory of log file
+	dateFormat     string  // name format of log file
+	fileSize       int64   // max size of single log file (MByte)
+	fileNamePrefix string  // prefix of log file
+	currentFile    logFile // owned exclusively by the writer goroutine
+	done           chan struct{}
+	ch             chan logCommand
+	writeErr       error // first writer error; read outside writer only after done closes
+	fileIndex      int
 	mutex          *sync.RWMutex
 	sdkClose       bool
+}
+
+// A flush command is ordered behind all previously accepted events.
+type logCommand struct {
+	data    []byte
+	flushed chan error
+}
+
+type logFile interface {
+	Write([]byte) (int, error)
+	Name() string
+	Stat() (os.FileInfo, error)
+	Sync() error
+	Close() error
 }
 
 type TDLogConsumerConfig struct {
@@ -56,6 +76,11 @@ func NewLogConsumerWithFileSize(directory string, r RotateMode, size int) (TDCon
 }
 
 func NewLogConsumerWithConfig(config TDLogConsumerConfig) (TDConsumer, error) {
+	const maxFileSizeMB = int64((1<<63 - 1) / (1024 * 1024))
+	if config.FileSize < 0 || int64(config.FileSize) > maxFileSizeMB {
+		return nil, fmt.Errorf("invalid FileSize %d: must be between 0 and %d MB", config.FileSize, maxFileSizeMB)
+	}
+
 	var df string
 	switch config.RotateMode {
 	case ROTATE_DAILY:
@@ -76,62 +101,69 @@ func NewLogConsumerWithConfig(config TDLogConsumerConfig) (TDConsumer, error) {
 	c := &TDLogConsumer{
 		directory:      config.Directory,
 		dateFormat:     df,
-		fileSize:       int64(config.FileSize * 1024 * 1024),
+		fileSize:       int64(config.FileSize) * 1024 * 1024,
 		fileNamePrefix: config.FileNamePrefix,
-		wg:             sync.WaitGroup{},
-		ch:             make(chan []byte, chanSize),
+		done:           make(chan struct{}),
+		ch:             make(chan logCommand, chanSize),
 		mutex:          new(sync.RWMutex),
 		sdkClose:       false,
 	}
 
-	return c, c.init()
+	if err := c.init(); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
+// Add returns after admission; Flush or Close reports asynchronous file errors.
 func (c *TDLogConsumer) Add(d Data) error {
-	var err error = nil
-	c.mutex.Lock()
-	if c.sdkClose {
-		err = errors.New("add event failed, SDK has been closed")
-	}
-	c.mutex.Unlock()
+	jsonBytes, err := json.Marshal(d)
 	if err != nil {
-		tdLogError(err.Error())
 		return err
 	}
-
-	jsonBytes, jsonErr := json.Marshal(d)
-	if jsonErr != nil {
-		err = jsonErr
-	} else {
-		c.ch <- jsonBytes
-	}
-	return err
-}
-
-func (c *TDLogConsumer) Flush() error {
-	tdLogInfo("flush data")
-	var err error = nil
-	c.mutex.Lock()
-	if c.currentFile != nil {
-		err = c.currentFile.Sync()
-	}
-	c.mutex.Unlock()
-	return err
-}
-
-func (c *TDLogConsumer) Close() error {
-	tdLogInfo("log consumer close")
-
-	var err error = nil
-	c.mutex.Lock()
+	// Keep admission protected until the send completes. The writer never takes
+	// this lock, so a full queue can drain while Close waits for admitted senders.
+	c.mutex.RLock()
 	if c.sdkClose {
-		err = errors.New("[ThinkingData][error]: SDK has been closed")
-	} else {
+		c.mutex.RUnlock()
+		return errors.New("add event failed, SDK has been closed")
+	}
+	c.ch <- logCommand{data: jsonBytes}
+	c.mutex.RUnlock()
+	// Invoke user loggers on the caller, outside the admission lock. A logger
+	// may call Flush or Close, which must remain independent of the writer.
+	if GetLogLevel() >= TDLogLevelInfo {
+		tdLogInfo("Enqueue event data: %s", parseTime(jsonBytes))
+	}
+	return nil
+}
+
+// Flush waits for earlier accepted events to be written and synced.
+// The first file error is retained and returned by subsequent Flush/Close calls.
+func (c *TDLogConsumer) Flush() error {
+	flushed := make(chan error, 1)
+	c.mutex.RLock()
+	if c.sdkClose {
+		c.mutex.RUnlock()
+		<-c.done
+		return c.writeErr
+	}
+	c.ch <- logCommand{flushed: flushed}
+	c.mutex.RUnlock()
+	return <-flushed
+}
+
+// Close stops admission and waits for all accepted events and final file sync.
+// Repeated and concurrent calls wait for the same result.
+func (c *TDLogConsumer) Close() error {
+	c.mutex.Lock()
+	if !c.sdkClose {
 		c.sdkClose = true
 		close(c.ch)
 	}
 	c.mutex.Unlock()
-	return err
+	<-c.done
+	return c.writeErr
 }
 
 func (c *TDLogConsumer) IsStringent() bool {
@@ -154,36 +186,37 @@ func (c *TDLogConsumer) constructFileName(timeStr string, i int) string {
 func (c *TDLogConsumer) init() error {
 	fd, err := c.initLogFile()
 	if err != nil {
-		tdLogError("init log file failed: %s", err)
 		return err
 	}
 	c.currentFile = fd
-
-	go func() {
-		defer func() {
-			if c.currentFile != nil {
-				_ = c.currentFile.Sync()
-				err = c.currentFile.Close()
-				c.currentFile = nil
-			}
-			tdLogInfo("Gracefully shutting down")
-		}()
-		for {
-			select {
-			case rec, ok := <-c.ch:
-				if !ok {
-					return
-				}
-				jsonStr := parseTime(rec)
-				tdLogInfo("write event data: %s", jsonStr)
-				c.writeToFile(jsonStr)
-			}
-		}
-	}()
-
-	tdLogInfo("Mode: log consumer, log path: " + c.directory)
-
+	go c.run()
 	return nil
+}
+
+func (c *TDLogConsumer) rememberError(err error) {
+	if err != nil && c.writeErr == nil {
+		c.writeErr = err
+	}
+}
+
+func (c *TDLogConsumer) run() {
+	defer close(c.done)
+	for command := range c.ch {
+		if command.flushed != nil {
+			if c.currentFile != nil {
+				c.rememberError(c.currentFile.Sync())
+			}
+			command.flushed <- c.writeErr
+			continue
+		}
+		jsonStr := parseTime(command.data)
+		c.rememberError(c.writeToFile(jsonStr))
+	}
+	if c.currentFile != nil {
+		c.rememberError(c.currentFile.Sync())
+		c.rememberError(c.currentFile.Close())
+		c.currentFile = nil
+	}
 }
 
 func (c *TDLogConsumer) initLogFile() (*os.File, error) {
@@ -195,57 +228,107 @@ func (c *TDLogConsumer) initLogFile() (*os.File, error) {
 		}
 	}
 	timeStr := time.Now().Format(c.dateFormat)
-	return os.OpenFile(c.constructFileName(timeStr, 0), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
+	if c.fileSize > 0 {
+		if err := c.restoreFileIndex(timeStr); err != nil {
+			return nil, err
+		}
+	}
+	return c.openWritableLogFile(timeStr)
 }
 
-var logFileIndex = 0
-
-func (c *TDLogConsumer) writeToFile(str string) {
-	timeStr := time.Now().Format(c.dateFormat)
-	// paging by Rotate Mode and current file size
-	var newName string
-	fName := c.constructFileName(timeStr, logFileIndex)
-
-	if c.currentFile == nil {
-		var openFileErr error
-		c.mutex.Lock()
-		c.currentFile, openFileErr = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
-		c.mutex.Unlock()
-		if openFileErr != nil {
-			tdLogInfo("open log file failed: %s\n", openFileErr)
-			return
-		}
-	}
-
-	if c.currentFile.Name() != fName {
-		newName = fName
-	} else if c.fileSize > 0 {
-		stat, _ := c.currentFile.Stat()
-		if stat.Size() > c.fileSize {
-			logFileIndex++
-			newName = c.constructFileName(timeStr, logFileIndex)
-		}
-	}
-	if newName != "" {
-		_ = c.currentFile.Sync()
-		err := c.currentFile.Close()
-		if err != nil {
-			tdLogInfo("close file failed: %s\n", err)
-			return
-		}
-		c.mutex.Lock()
-		c.currentFile, err = os.OpenFile(fName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
-		c.mutex.Unlock()
-		if err != nil {
-			tdLogInfo("rotate log file failed: %s\n", err)
-			return
-		}
-	}
-	_, err := fmt.Fprintln(c.currentFile, str)
+// Resume the latest numbered file for this period and prefix on restart.
+// Older partial files and gaps must not move the append position backwards.
+func (c *TDLogConsumer) restoreFileIndex(timeStr string) error {
+	entries, err := ioutil.ReadDir(c.directory)
 	if err != nil {
-		tdLogInfo("LoggerWriter(%q): %s\n", c.currentFile.Name(), err)
-		return
+		return fmt.Errorf("read log directory: %w", err)
 	}
+	prefix := strings.TrimSuffix(filepath.Base(c.constructFileName(timeStr, 0)), "0")
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(entry.Name(), prefix)
+		index, err := strconv.Atoi(suffix)
+		// Only accept names generated by constructFileName, not backups or suffixes.
+		if err == nil && index >= 0 && strconv.Itoa(index) == suffix && index > c.fileIndex {
+			c.fileIndex = index
+		}
+	}
+	return nil
+}
+
+// Check every candidate, including files left by a previous process. Called
+// during initialization or by the writer, which exclusively owns fileIndex.
+func (c *TDLogConsumer) openWritableLogFile(timeStr string) (*os.File, error) {
+	for {
+		file, err := os.OpenFile(c.constructFileName(timeStr, c.fileIndex), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0664)
+		if err != nil {
+			return nil, fmt.Errorf("open log file: %w", err)
+		}
+		if c.fileSize <= 0 {
+			return file, nil
+		}
+		stat, err := file.Stat()
+		if err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("stat log file: %w", err)
+		}
+		if stat.Size() <= c.fileSize {
+			return file, nil
+		}
+		// No writes were made to this candidate; close it before trying the next.
+		if err := file.Close(); err != nil {
+			return nil, fmt.Errorf("close skipped log file: %w", err)
+		}
+		if c.fileIndex == int(^uint(0)>>1) {
+			return nil, errors.New("log file index overflow")
+		}
+		c.fileIndex++
+	}
+}
+
+// Called only by the writer goroutine, including rotation and error handling.
+func (c *TDLogConsumer) writeToFile(str string) error {
+	timeStr := time.Now().Format(c.dateFormat)
+	fileName := c.constructFileName(timeStr, c.fileIndex)
+	if c.currentFile != nil {
+		if c.currentFile.Name() == fileName && c.fileSize > 0 {
+			stat, err := c.currentFile.Stat()
+			if err != nil {
+				return fmt.Errorf("stat log file: %w", err)
+			}
+			if stat.Size() > c.fileSize {
+				if c.fileIndex == int(^uint(0)>>1) {
+					return errors.New("log file index overflow")
+				}
+				c.fileIndex++
+				fileName = c.constructFileName(timeStr, c.fileIndex)
+			}
+		}
+		if c.currentFile.Name() != fileName {
+			syncErr := c.currentFile.Sync()
+			closeErr := c.currentFile.Close()
+			c.currentFile = nil
+			if syncErr != nil {
+				return fmt.Errorf("sync rotated log file: %w", syncErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("close rotated log file: %w", closeErr)
+			}
+		}
+	}
+	if c.currentFile == nil {
+		file, err := c.openWritableLogFile(timeStr)
+		if err != nil {
+			return err
+		}
+		c.currentFile = file
+	}
+	if _, err := fmt.Fprintln(c.currentFile, str); err != nil {
+		return fmt.Errorf("write log file: %w", err)
+	}
+	return nil
 }
 
 // Deprecated: please use TDLogConsumer

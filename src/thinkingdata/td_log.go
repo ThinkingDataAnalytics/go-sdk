@@ -2,6 +2,7 @@ package thinkingdata
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -9,6 +10,7 @@ import (
 const SDK_LOG_PREFIX = "[ThinkingData]"
 
 var logInstance TDLogger
+var logMutex sync.RWMutex
 
 type TDLogLevel int32
 
@@ -23,7 +25,8 @@ const (
 // default is TDLogLevelOff
 var currentLogLevel = TDLogLevelOff
 
-// TDLogger User-defined log classes must comply with interface
+// TDLogger receives diagnostic messages. Print may be called concurrently.
+// Panics from Print are contained so logging cannot interrupt event delivery.
 type TDLogger interface {
 	Print(message string)
 }
@@ -33,24 +36,32 @@ func SetLogLevel(level TDLogLevel) {
 	if level < TDLogLevelOff || level > TDLogLevelDebug {
 		fmt.Println(SDK_LOG_PREFIX + "log type error")
 		return
-	} else {
-		currentLogLevel = level
 	}
+	logMutex.Lock()
+	currentLogLevel = level
+	logMutex.Unlock()
 }
 
 func GetLogLevel() TDLogLevel {
+	logMutex.RLock()
+	defer logMutex.RUnlock()
 	return currentLogLevel
 }
 
 // SetCustomLogger Set a custom log input class, usually you don't need to set it up.
 func SetCustomLogger(logger TDLogger) {
 	if logger != nil {
+		logMutex.Lock()
 		logInstance = logger
+		logMutex.Unlock()
 	}
 }
 
 func tdLog(level TDLogLevel, format string, v ...interface{}) {
-	if level > currentLogLevel {
+	logMutex.RLock()
+	configuredLevel, logger := currentLogLevel, logInstance
+	logMutex.RUnlock()
+	if level > configuredLevel {
 		return
 	}
 
@@ -73,9 +84,13 @@ func tdLog(level TDLogLevel, format string, v ...interface{}) {
 		break
 	}
 
-	if logInstance != nil {
+	if logger != nil {
 		msg := fmt.Sprintf(SDK_LOG_PREFIX+modeStr+format+"\n", v...)
-		logInstance.Print(msg)
+		// Never hold configuration locks or log again while invoking user code.
+		_ = withPanicRecovery(func() error {
+			logger.Print(msg)
+			return nil
+		})
 	} else {
 		logTime := fmt.Sprintf("[%v]", time.Now().Format("2006-01-02 15:04:05.000"))
 		fmt.Printf(logTime+SDK_LOG_PREFIX+modeStr+format+"\n", v...)
@@ -122,8 +137,8 @@ func SetLoggerConfig(config LoggerConfig) {
 		return
 	}
 	if config.Type&LoggerTypeOff == LoggerTypeOff {
-		currentLogLevel = TDLogLevelOff
+		SetLogLevel(TDLogLevelOff)
 	} else {
-		currentLogLevel = TDLogLevelInfo
+		SetLogLevel(TDLogLevelInfo)
 	}
 }
